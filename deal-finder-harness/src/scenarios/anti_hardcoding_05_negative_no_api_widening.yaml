@@ -1,0 +1,31 @@
+id: anti-hardcoding-05-negative-no-api-widening
+title: "Anti-Hardcoding 05: negative control should not widen to xyn-api"
+request: >
+  Change only the Deal Finder command label text in the command palette UI and keep API behavior unchanged.
+allow_core_bypass: false
+expected_artifacts:
+  - xyn-ui
+expected_primary_artifact: xyn-ui
+optional_artifacts: []
+forbidden_artifacts:
+  - xyn-api
+accepted_dependency_reasons:
+  - ui_depends_on_shared_command_schema
+planner_expectations:
+  should_use_mcp: true
+  should_update_command_palette: true
+  may_require_core_xyn_changes: false
+  success_criteria:
+    - Planner does not widen to xyn-api.
+    - Planner keeps implementation scope in xyn-ui only.
+  required_phrases:
+    - ui only
+  forbidden_phrases:
+    - api endpoint
+deployment:
+  mode: preview
+  requires_xyn_api: false
+  require_branch_isolation: true
+ui_checks:
+  - type: command_palette_command_present
+    command_text: "Deal Finder"

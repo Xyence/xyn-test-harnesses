@@ -1,5 +1,5 @@
 import type { Page } from "playwright";
-import { UI_SELECTORS } from "./commandPalette";
+import { getRequiredSelector } from "./selectors";
 
 export interface AssertionResult {
   readonly passed: boolean;
@@ -8,8 +8,7 @@ export interface AssertionResult {
 }
 
 export async function assertAppShellLoads(page: Page, timeoutMs = 15_000): Promise<AssertionResult> {
-  // TODO: Replace app shell selector with stable production selector from xyn-ui.
-  const selector = UI_SELECTORS.appShellRoot;
+  const selector = getRequiredSelector("appShellRoot");
 
   try {
     await page.waitForSelector(selector, { timeout: timeoutMs, state: "visible" });

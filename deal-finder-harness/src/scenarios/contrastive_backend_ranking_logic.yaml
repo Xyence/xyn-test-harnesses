@@ -1,0 +1,33 @@
+id: contrastive-backend-ranking-logic
+title: "Contrastive: backend ranking logic"
+request: >
+  Change Deal Finder ranking behavior for command suggestions by updating backend scoring logic.
+allow_core_bypass: false
+expected_artifacts:
+  - xyn-api
+expected_primary_artifact: xyn-api
+optional_artifacts:
+  - deal-finder-harness
+forbidden_artifacts:
+  - xyn-ui
+accepted_dependency_reasons:
+  - api_depends_on_shared_contract
+artifact_selection_differ_group: contrastive-ui-vs-api
+planner_expectations:
+  should_use_mcp: true
+  should_update_command_palette: false
+  may_require_core_xyn_changes: false
+  success_criteria:
+    - Selection focuses on API ranking logic.
+    - Planner avoids primary UI-only implementation path.
+  required_phrases:
+    - ranking
+  forbidden_phrases:
+    - ui-only
+deployment:
+  mode: preview
+  requires_xyn_api: true
+  require_branch_isolation: true
+ui_checks:
+  - type: command_palette_command_present
+    command_text: "Deal Finder"

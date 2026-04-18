@@ -1,0 +1,30 @@
+id: family-intent-ui-phrase-c
+title: "Family A: UI command phrasing variant C"
+request: >
+  Update command palette copy so the phrase Deal Finder appears as a searchable command.
+allow_core_bypass: false
+expected_artifacts:
+  - xyn-ui
+expected_primary_artifact: xyn-ui
+optional_artifacts:
+  - deal-finder-harness
+forbidden_artifacts: []
+accepted_dependency_reasons:
+  - ui_depends_on_shared_command_schema
+planner_expectations:
+  should_use_mcp: true
+  should_update_command_palette: true
+  may_require_core_xyn_changes: false
+  success_criteria:
+    - xyn-ui is selected for the command palette update.
+    - Planner includes search behavior for command matching.
+  required_phrases:
+    - command palette
+  forbidden_phrases: []
+deployment:
+  mode: preview
+  requires_xyn_api: false
+  require_branch_isolation: true
+ui_checks:
+  - type: command_palette_command_present
+    command_text: "Deal Finder"

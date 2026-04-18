@@ -1,0 +1,32 @@
+id: contrastive-frontend-palette-copy
+title: "Contrastive: UI phrasing change"
+request: >
+  Tweak the Deal Finder command text displayed in the command palette UI.
+allow_core_bypass: false
+expected_artifacts:
+  - xyn-ui
+expected_primary_artifact: xyn-ui
+optional_artifacts:
+  - deal-finder-harness
+forbidden_artifacts:
+  - xyn-api
+accepted_dependency_reasons:
+  - ui_depends_on_shared_command_schema
+artifact_selection_differ_group: contrastive-ui-vs-api
+planner_expectations:
+  should_use_mcp: true
+  should_update_command_palette: true
+  may_require_core_xyn_changes: false
+  success_criteria:
+    - Selection focuses on UI command rendering.
+    - Planner identifies command palette UI update scope.
+  required_phrases:
+    - command palette
+  forbidden_phrases: []
+deployment:
+  mode: preview
+  requires_xyn_api: false
+  require_branch_isolation: true
+ui_checks:
+  - type: command_palette_command_present
+    command_text: "Deal Finder"

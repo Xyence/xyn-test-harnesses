@@ -1,0 +1,33 @@
+id: anti-hardcoding-01-palette-wording-update
+title: "Anti-Hardcoding 01: command palette wording update"
+request: >
+  Update Deal Finder command palette wording in xyn-ui so users can discover the command by searching for Deal Finder.
+allow_core_bypass: false
+expected_artifacts:
+  - xyn-ui
+expected_primary_artifact: xyn-ui
+optional_artifacts:
+  - deal-finder-harness
+forbidden_artifacts:
+  - xyn-api
+accepted_dependency_reasons:
+  - ui_depends_on_shared_command_schema
+planner_expectations:
+  should_use_mcp: true
+  should_update_command_palette: true
+  may_require_core_xyn_changes: false
+  success_criteria:
+    - Planner selects xyn-ui for command palette wording updates.
+    - Planner includes implementation and validation steps.
+  required_phrases:
+    - command palette
+    - xyn-ui
+  forbidden_phrases:
+    - backend-only
+deployment:
+  mode: preview
+  requires_xyn_api: false
+  require_branch_isolation: true
+ui_checks:
+  - type: command_palette_command_present
+    command_text: "Deal Finder"

@@ -1,0 +1,33 @@
+id: anti-hardcoding-03-palette-wording-paraphrase-2
+title: "Anti-Hardcoding 03: second paraphrase of wording update"
+request: >
+  Adjust command palette copy for Deal Finder in the UI to improve natural-language findability without changing backend logic.
+allow_core_bypass: false
+expected_artifacts:
+  - xyn-ui
+expected_primary_artifact: xyn-ui
+optional_artifacts:
+  - deal-finder-harness
+forbidden_artifacts:
+  - xyn-api
+accepted_dependency_reasons:
+  - ui_depends_on_shared_command_schema
+planner_expectations:
+  should_use_mcp: true
+  should_update_command_palette: true
+  may_require_core_xyn_changes: false
+  success_criteria:
+    - Planner identifies frontend-only command palette modifications.
+    - Planner distinguishes implementation from validation.
+  required_phrases:
+    - command palette
+    - frontend
+  forbidden_phrases:
+    - data pipeline
+deployment:
+  mode: preview
+  requires_xyn_api: false
+  require_branch_isolation: true
+ui_checks:
+  - type: command_palette_command_present
+    command_text: "Deal Finder"

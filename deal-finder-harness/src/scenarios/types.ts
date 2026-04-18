@@ -86,6 +86,8 @@ export const ScenarioSchema = z.object({
   expected_primary_artifact: z.string().min(1),
   optional_artifacts: z.array(z.string().min(1)).default([]),
   forbidden_artifacts: z.array(z.string().min(1)).default([]),
+  accepted_dependency_reasons: z.array(z.string().min(1)).default([]),
+  artifact_selection_differ_group: z.string().min(1).optional(),
   planner_expectations: PlannerExpectationsSchema,
   deployment: DeploymentSchema,
   ui_checks: z.array(UiCheckSchema).min(1),

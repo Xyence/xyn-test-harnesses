@@ -1,7 +1,7 @@
 import { loadEnvConfig } from "./config/env";
-import { buildPlaceholderAuthProvider } from "./auth/authProvider";
+import { buildCachedTokenAuthProvider } from "./auth/authProvider";
 import { buildHttpMcpClient } from "./clients/mcpClient";
-import { buildPlaceholderCommandPaletteVerifier } from "./ui/playwright/commandPalette";
+import { buildPlaywrightCommandPaletteVerifier } from "./ui/playwright/commandPalette";
 import { discoverScenarios } from "./scenarios/discovery";
 import { ScenarioRunner } from "./runners/scenarioRunner";
 import { CoreBypassRunner } from "./runners/coreBypassRunner";
@@ -11,10 +11,27 @@ import { writeLatestReport } from "./reports/reportWriter";
 async function main(): Promise<void> {
   const env = loadEnvConfig();
 
-  const authProvider = buildPlaceholderAuthProvider();
+  const authProvider = buildCachedTokenAuthProvider({
+    tokenFilePath: env.MCP_AUTH_TOKEN_FILE,
+    googleClientId: env.GOOGLE_OAUTH_CLIENT_ID ?? env.XYN_OIDC_CLIENT_ID,
+    googleClientSecret: env.GOOGLE_OAUTH_CLIENT_SECRET,
+  });
+
+  const session = await authProvider.getSession();
+  console.log("MCP auth diagnostics", {
+    tokenPresent: session.accessToken.length > 0,
+    tokenType: session.tokenType,
+    expiry: session.expiresAtIso,
+    audience: session.audience,
+    targetMcpUrl: env.MCP_BASE_URL,
+  });
+
   const mcpClient = buildHttpMcpClient({
     baseUrl: env.MCP_BASE_URL,
-    authToken: env.MCP_AUTH_TOKEN,
+    authTokenProvider: async () => {
+      const refreshedSession = await authProvider.getSession();
+      return refreshedSession.accessToken;
+    },
     endpoints: {
       submitRequest: env.MCP_ENDPOINT_SUBMIT_REQUEST,
       artifactSelection: env.MCP_ENDPOINT_ARTIFACT_SELECTION,
@@ -24,8 +41,11 @@ async function main(): Promise<void> {
       branchInfo: env.MCP_ENDPOINT_BRANCH_INFO,
     },
   });
-  const uiVerifier = buildPlaceholderCommandPaletteVerifier({
-    baseUrl: env.XYN_UI_BASE_URL,
+
+  const uiVerifier = buildPlaywrightCommandPaletteVerifier({
+    storageStatePath: env.PLAYWRIGHT_STORAGE_STATE,
+    artifactsDir: env.ARTIFACTS_DIR,
+    headless: env.PLAYWRIGHT_HEADLESS,
   });
   const coreBypassRunner = new CoreBypassRunner();
   const verificationRunner = new VerificationRunner({
@@ -35,7 +55,11 @@ async function main(): Promise<void> {
   });
 
   const discovered = await discoverScenarios();
-  const scenarios = discovered.filter((scenario) => scenario.id === env.HARNESS_SCENARIO_ID);
+  const scenarios =
+    env.HARNESS_SCENARIO_ID === "all"
+      ? discovered
+      : discovered.filter((scenario) => scenario.id === env.HARNESS_SCENARIO_ID);
+
   if (scenarios.length === 0) {
     throw new Error(`Scenario '${env.HARNESS_SCENARIO_ID}' not found in src/scenarios`);
   }
@@ -57,6 +81,8 @@ async function main(): Promise<void> {
     passedScenarios: report.summary.passedScenarios,
     failedScenarios: report.summary.failedScenarios,
     scenariosUsingCoreBypass: report.summary.scenariosUsingCoreBypass,
+    artifactSelectionDifferenceViolations: report.summary.artifactSelectionDifferenceViolations,
+    cannedPlanViolations: report.summary.cannedPlanViolations,
     latestReportPath: `${env.ARTIFACTS_DIR}/reports/latest.json`,
   };
 

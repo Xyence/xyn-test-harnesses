@@ -1,0 +1,31 @@
+id: negative-control-api-migration
+title: "Negative control: API migration should not pick xyn-ui"
+request: >
+  Migrate Deal Finder source contract fields in xyn-api and keep UI unchanged.
+allow_core_bypass: false
+expected_artifacts:
+  - xyn-api
+expected_primary_artifact: xyn-api
+optional_artifacts: []
+forbidden_artifacts:
+  - xyn-ui
+accepted_dependency_reasons:
+  - api_depends_on_shared_contract
+planner_expectations:
+  should_use_mcp: true
+  should_update_command_palette: false
+  may_require_core_xyn_changes: false
+  success_criteria:
+    - xyn-api is selected as the primary artifact.
+    - planner avoids direct command palette UI modifications.
+  required_phrases:
+    - xyn-api
+  forbidden_phrases:
+    - ui copy only
+deployment:
+  mode: preview
+  requires_xyn_api: true
+  require_branch_isolation: true
+ui_checks:
+  - type: command_palette_command_present
+    command_text: "Deal Finder"

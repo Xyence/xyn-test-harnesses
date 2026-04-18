@@ -5,7 +5,8 @@ import type { ScenarioDefinition } from "../scenarios/types";
 import { createBrowserSession } from "../ui/playwright/browser";
 import { verifySessionLoaded } from "../ui/playwright/login";
 import { assertAppShellLoads } from "../ui/playwright/assertions";
-import { UI_SELECTORS, openCommandPalette } from "../ui/playwright/commandPalette";
+import { openCommandPalette } from "../ui/playwright/commandPalette";
+import { getRequiredSelector } from "../ui/playwright/selectors";
 
 export interface VerificationRunnerConfig {
   readonly artifactsDir: string;
@@ -237,13 +238,13 @@ async function verifyCommandPhrasePresent(
   await openCommandPalette(page);
   details.push("Opened command palette");
 
-  const input = page.locator(UI_SELECTORS.commandPaletteInput).first();
+  const input = page.locator(getRequiredSelector("commandPaletteInput")).first();
   await input.fill(phrase);
   details.push(`Entered phrase '${phrase}' into command palette`);
 
   // TODO: Confirm deterministic command palette result container selector.
   const resultText = await page
-    .locator(UI_SELECTORS.commandPaletteResults)
+    .locator(getRequiredSelector("commandPaletteResults"))
     .first()
     .innerText()
     .catch(() => "");

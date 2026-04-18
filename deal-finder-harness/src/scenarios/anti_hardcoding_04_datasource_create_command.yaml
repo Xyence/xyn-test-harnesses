@@ -1,0 +1,35 @@
+id: anti-hardcoding-04-datasource-create-command
+title: "Anti-Hardcoding 04: data source create command"
+request: >
+  Add a command palette action to create a Deal Finder data source from the UI and verify the new data source appears.
+allow_core_bypass: false
+expected_artifacts:
+  - xyn-ui
+expected_primary_artifact: xyn-ui
+optional_artifacts:
+  - deal-finder-harness
+forbidden_artifacts:
+  - xyn-api
+accepted_dependency_reasons:
+  - ui_depends_on_shared_command_schema
+planner_expectations:
+  should_use_mcp: true
+  should_update_command_palette: true
+  may_require_core_xyn_changes: false
+  success_criteria:
+    - Planner keeps primary scope on xyn-ui command behavior.
+    - Planner includes datasource create verification.
+  required_phrases:
+    - data source
+    - create
+  forbidden_phrases:
+    - full backend rewrite
+deployment:
+  mode: preview
+  requires_xyn_api: false
+  require_branch_isolation: true
+ui_checks:
+  - type: command_palette_command_present
+    command_text: "Create data source"
+  - type: datasource_create
+    datasource_name: "Deal Finder Primary Source"

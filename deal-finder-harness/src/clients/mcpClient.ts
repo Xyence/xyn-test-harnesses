@@ -38,11 +38,18 @@ export interface HttpClient {
 
 export interface McpDevelopmentConfig {
   readonly baseUrl: string;
-  readonly authToken: string;
+  readonly authTokenProvider: () => Promise<string>;
   readonly timeoutMs?: number;
   readonly endpoints?: Partial<McpEndpointMap>;
   readonly extraHeaders?: Record<string, string>;
   readonly httpClient?: HttpClient;
+}
+
+export interface ArtifactSelectionDetail {
+  readonly artifact: string;
+  readonly rationale: string | null;
+  readonly dependencyReason: string | null;
+  readonly confidence: number | null;
 }
 
 export interface DevelopmentRequestResult {
@@ -50,6 +57,7 @@ export interface DevelopmentRequestResult {
   readonly selectedArtifacts: readonly string[];
   readonly primaryArtifact: string;
   readonly dependentArtifacts: readonly string[];
+  readonly artifactDetails: readonly ArtifactSelectionDetail[];
   readonly plannerPlan: unknown;
   readonly siblingId: string;
   readonly siblingUrl: string;
@@ -89,6 +97,7 @@ class FetchHttpClient implements HttpClient {
     private readonly baseUrl: string,
     private readonly timeoutMs: number,
     private readonly defaultHeaders: Record<string, string>,
+    private readonly authTokenProvider: () => Promise<string>,
     private readonly fetchImpl: typeof fetch = fetch,
   ) {}
 
@@ -103,9 +112,12 @@ class FetchHttpClient implements HttpClient {
       }
     }
 
+    const authToken = await this.authTokenProvider();
+
     const headers: Record<string, string> = {
       ...this.defaultHeaders,
       ...request.headers,
+      authorization: `Bearer ${authToken}`,
     };
 
     const controller = new AbortController();
@@ -243,7 +255,16 @@ export async function submitDevelopmentRequest(
   );
   rawResponses.branchInfo = branchInfoResponse;
 
+  const artifactDetails =
+    extractArtifactDetails(submitResponse.data) ??
+    extractArtifactDetails(artifactSelectionResponse) ??
+    ([] as ArtifactSelectionDetail[]);
+
+  const selectedArtifactsFromDetails =
+    artifactDetails.length > 0 ? artifactDetails.map((detail) => detail.artifact) : undefined;
+
   const selectedArtifacts =
+    selectedArtifactsFromDetails ??
     extractFirstStringArray(submitResponse.data, [
       ["selectedArtifacts"],
       ["selected_artifacts"],
@@ -346,6 +367,7 @@ export async function submitDevelopmentRequest(
     selectedArtifacts: requiredSelectedArtifacts,
     primaryArtifact: requiredPrimaryArtifact,
     dependentArtifacts: requiredDependentArtifacts,
+    artifactDetails,
     plannerPlan: requiredPlannerPlan,
     siblingId: requiredSiblingId,
     siblingUrl: requiredSiblingUrl,
@@ -368,11 +390,15 @@ function resolveEndpoints(overrides: Partial<McpEndpointMap> | undefined): McpEn
 function buildDefaultHttpClient(config: McpDevelopmentConfig): HttpClient {
   const headers: Record<string, string> = {
     "content-type": "application/json",
-    authorization: `Bearer ${config.authToken}`,
     ...(config.extraHeaders ?? {}),
   };
 
-  return new FetchHttpClient(config.baseUrl, config.timeoutMs ?? 30_000, headers);
+  return new FetchHttpClient(
+    config.baseUrl,
+    config.timeoutMs ?? 30_000,
+    headers,
+    config.authTokenProvider,
+  );
 }
 
 async function requestOptionalEndpoint(
@@ -395,6 +421,83 @@ async function requestOptionalEndpoint(
   });
 
   return response.data;
+}
+
+function extractArtifactDetails(value: unknown): ArtifactSelectionDetail[] | undefined {
+  const candidates = [
+    ["artifactSelection", "details"],
+    ["artifactSelection", "artifacts"],
+    ["artifacts", "details"],
+    ["artifacts", "selected"],
+    ["selectedArtifacts"],
+    ["selected_artifacts"],
+  ] as const;
+
+  for (const path of candidates) {
+    const raw = getByPath(value, path);
+    if (!Array.isArray(raw)) {
+      continue;
+    }
+
+    const details = raw
+      .map((item) => normalizeArtifactDetail(item))
+      .filter((item): item is ArtifactSelectionDetail => item !== null);
+
+    if (details.length > 0) {
+      return details;
+    }
+  }
+
+  return undefined;
+}
+
+function normalizeArtifactDetail(value: unknown): ArtifactSelectionDetail | null {
+  if (typeof value === "string" && value.length > 0) {
+    return {
+      artifact: value,
+      rationale: null,
+      dependencyReason: null,
+      confidence: null,
+    };
+  }
+
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const artifact =
+    asNonEmptyString(record.artifact) ??
+    asNonEmptyString(record.name) ??
+    asNonEmptyString(record.artifact_id) ??
+    asNonEmptyString(record.artifactId);
+
+  if (!artifact) {
+    return null;
+  }
+
+  return {
+    artifact,
+    rationale: asNonEmptyString(record.rationale) ?? null,
+    dependencyReason:
+      asNonEmptyString(record.dependency_reason) ?? asNonEmptyString(record.dependencyReason) ?? null,
+    confidence: asNumber(record.confidence),
+  };
+}
+
+function asNonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+function asNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
 }
 
 function extractFirstKnown(value: unknown, paths: readonly (readonly string[])[]): unknown {

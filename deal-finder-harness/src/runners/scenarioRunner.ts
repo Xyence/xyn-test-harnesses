@@ -2,7 +2,12 @@ import type { AuthProvider } from "../auth/authProvider";
 import type { McpClient } from "../clients/mcpClient";
 import { runUiCheck } from "../checks/stepChecks";
 import { runArtifactSelectionCheck, type ArtifactSelectionCheckResult } from "../checks/artifactSelectionCheck";
-import { runPlannerCheck, type PlannerCheckResult } from "../checks/plannerCheck";
+import {
+  buildIntentKeywords,
+  normalizeText,
+  runPlannerCheck,
+  type PlannerCheckResult,
+} from "../checks/plannerCheck";
 import { runSiblingCheck, type SiblingCheckResult } from "../checks/siblingCheck";
 import { runUrlCheck, type UrlCheckResult } from "../checks/urlCheck";
 import type { StructuredCheckResult } from "../checks/campaignCrudCheck";
@@ -27,6 +32,18 @@ export interface ScenarioRunResult {
   readonly coreBypass: CoreBypassResult;
 }
 
+export interface ArtifactSelectionDifferenceViolation {
+  readonly differGroup: string;
+  readonly artifactSet: readonly string[];
+  readonly scenarioIds: readonly string[];
+}
+
+export interface CannedPlanViolation {
+  readonly scenarioIdA: string;
+  readonly scenarioIdB: string;
+  readonly similarity: number;
+}
+
 export interface HarnessRunReport {
   readonly generatedAtIso: string;
   readonly summary: {
@@ -34,7 +51,11 @@ export interface HarnessRunReport {
     readonly passedScenarios: number;
     readonly failedScenarios: number;
     readonly scenariosUsingCoreBypass: number;
+    readonly artifactSelectionDifferenceViolations: number;
+    readonly cannedPlanViolations: number;
   };
+  readonly artifactSelectionDifferenceViolations: readonly ArtifactSelectionDifferenceViolation[];
+  readonly cannedPlanViolations: readonly CannedPlanViolation[];
   readonly scenarios: readonly ScenarioRunResult[];
 }
 
@@ -54,11 +75,15 @@ const MISSING_DEVELOPMENT_RESULT_ARTIFACT_CHECK: ArtifactSelectionCheckResult = 
     requiredArtifacts: [],
     forbiddenArtifacts: [],
     optionalArtifacts: [],
+    acceptedDependencyReasons: [],
     expectedPrimaryArtifact: "",
-    observedPrimaryArtifact: null,
+    observedPrimaryArtifact: "",
+    artifactDetails: [],
     missingRequiredArtifacts: [],
     presentForbiddenArtifacts: [],
     unexpectedArtifacts: [],
+    unexpectedArtifactsAllowedByDependencyReason: [],
+    unexpectedArtifactsRejected: [],
   },
 };
 
@@ -74,6 +99,12 @@ const MISSING_DEVELOPMENT_RESULT_PLANNER_CHECK: PlannerCheckResult = {
     presentForbiddenPhrases: [],
     requestIntentKeywords: [],
     matchedIntentKeywords: [],
+    selectedArtifacts: [],
+    missingSelectedArtifactReferences: [],
+    widenedDependencies: [],
+    widenedDependencyJustificationsMissing: [],
+    hasImplementationSteps: false,
+    hasValidationSteps: false,
   },
 };
 
@@ -193,6 +224,8 @@ export class ScenarioRunner {
         }
       }
 
+      this.deps.uiVerifier.setActiveSiblingUrl(mcpResult.developmentResult.siblingUrl);
+
       const verification = await this.deps.verificationRunner.run(
         scenario,
         mcpResult.developmentResult.siblingUrl,
@@ -231,17 +264,194 @@ export class ScenarioRunner {
       });
     }
 
-    const passedScenarios = scenarioResults.filter((result) => result.passed).length;
+    const differenceViolations = computeArtifactSelectionDifferenceViolations(scenarios, scenarioResults);
+    const cannedPlanViolations = computeCannedPlanViolations(scenarios, scenarioResults);
+
+    const cannedViolationIds = new Set(
+      cannedPlanViolations.flatMap((violation) => [violation.scenarioIdA, violation.scenarioIdB]),
+    );
+
+    const resultsWithCannedEnforcement = scenarioResults.map((result) => {
+      if (!cannedViolationIds.has(result.scenarioId)) {
+        return result;
+      }
+
+      return {
+        ...result,
+        passed: false,
+        mcpDetails: `${result.mcpDetails}; canned-plan detector violation`,
+      };
+    });
+
+    const passedScenarios = resultsWithCannedEnforcement.filter((result) => result.passed).length;
 
     return {
       generatedAtIso: new Date().toISOString(),
       summary: {
-        totalScenarios: scenarioResults.length,
+        totalScenarios: resultsWithCannedEnforcement.length,
         passedScenarios,
-        failedScenarios: scenarioResults.length - passedScenarios,
-        scenariosUsingCoreBypass: scenarioResults.filter((result) => result.coreBypass.used).length,
+        failedScenarios: resultsWithCannedEnforcement.length - passedScenarios,
+        scenariosUsingCoreBypass: resultsWithCannedEnforcement.filter((result) => result.coreBypass.used).length,
+        artifactSelectionDifferenceViolations: differenceViolations.length,
+        cannedPlanViolations: cannedPlanViolations.length,
       },
-      scenarios: scenarioResults,
+      artifactSelectionDifferenceViolations: differenceViolations,
+      cannedPlanViolations,
+      scenarios: resultsWithCannedEnforcement,
     };
   }
+}
+
+function computeArtifactSelectionDifferenceViolations(
+  scenarios: readonly ScenarioDefinition[],
+  results: readonly ScenarioRunResult[],
+): ArtifactSelectionDifferenceViolation[] {
+  const scenarioById = new Map<string, ScenarioDefinition>(scenarios.map((scenario) => [scenario.id, scenario]));
+  const grouped = new Map<string, Array<{ scenarioId: string; artifactSet: readonly string[] }>>();
+
+  for (const result of results) {
+    const scenario = scenarioById.get(result.scenarioId);
+    if (!scenario?.artifact_selection_differ_group) {
+      continue;
+    }
+
+    const artifactSet = normalizeArtifactSet(result.artifactSelectionCheck.observed.selectedArtifacts);
+    const existing = grouped.get(scenario.artifact_selection_differ_group) ?? [];
+    existing.push({ scenarioId: result.scenarioId, artifactSet });
+    grouped.set(scenario.artifact_selection_differ_group, existing);
+  }
+
+  const violations: ArtifactSelectionDifferenceViolation[] = [];
+
+  for (const [group, entries] of grouped.entries()) {
+    const bySetKey = new Map<string, string[]>();
+
+    for (const entry of entries) {
+      const key = entry.artifactSet.join("|");
+      const ids = bySetKey.get(key) ?? [];
+      ids.push(entry.scenarioId);
+      bySetKey.set(key, ids);
+    }
+
+    for (const [setKey, scenarioIds] of bySetKey.entries()) {
+      if (scenarioIds.length > 1) {
+        violations.push({
+          differGroup: group,
+          artifactSet: setKey.length > 0 ? setKey.split("|") : [],
+          scenarioIds,
+        });
+      }
+    }
+  }
+
+  return violations;
+}
+
+function computeCannedPlanViolations(
+  scenarios: readonly ScenarioDefinition[],
+  results: readonly ScenarioRunResult[],
+): CannedPlanViolation[] {
+  const scenarioById = new Map<string, ScenarioDefinition>(scenarios.map((scenario) => [scenario.id, scenario]));
+  const violations: CannedPlanViolation[] = [];
+
+  for (let i = 0; i < results.length; i += 1) {
+    for (let j = i + 1; j < results.length; j += 1) {
+      const a = results[i];
+      const b = results[j];
+      const scenarioA = scenarioById.get(a.scenarioId);
+      const scenarioB = scenarioById.get(b.scenarioId);
+      if (!scenarioA || !scenarioB) {
+        continue;
+      }
+
+      if (areRelatedScenarios(scenarioA, scenarioB)) {
+        continue;
+      }
+
+      const similarity = plannerSimilarity(
+        a.plannerCheck.observed.normalizedPlannerText,
+        b.plannerCheck.observed.normalizedPlannerText,
+      );
+
+      const identical =
+        a.plannerCheck.observed.normalizedPlannerText.length > 0 &&
+        a.plannerCheck.observed.normalizedPlannerText === b.plannerCheck.observed.normalizedPlannerText;
+
+      if (identical || similarity >= 0.9) {
+        violations.push({
+          scenarioIdA: a.scenarioId,
+          scenarioIdB: b.scenarioId,
+          similarity,
+        });
+      }
+    }
+  }
+
+  return violations;
+}
+
+function areRelatedScenarios(a: ScenarioDefinition, b: ScenarioDefinition): boolean {
+  if (a.artifact_selection_differ_group && b.artifact_selection_differ_group) {
+    if (a.artifact_selection_differ_group === b.artifact_selection_differ_group) {
+      return false;
+    }
+  }
+
+  if (a.expected_primary_artifact === b.expected_primary_artifact) {
+    return true;
+  }
+
+  const keywordsA = new Set(buildIntentKeywords(a.request));
+  const keywordsB = new Set(buildIntentKeywords(b.request));
+  const shared = [...keywordsA].filter((keyword) => keywordsB.has(keyword)).length;
+  const union = new Set([...keywordsA, ...keywordsB]).size;
+
+  if (union === 0) {
+    return false;
+  }
+
+  const jaccard = shared / union;
+  return jaccard >= 0.35;
+}
+
+function plannerSimilarity(textA: string, textB: string): number {
+  const tokensA = tokenizeForSimilarity(textA);
+  const tokensB = tokenizeForSimilarity(textB);
+
+  if (tokensA.size === 0 || tokensB.size === 0) {
+    return 0;
+  }
+
+  const intersection = [...tokensA].filter((token) => tokensB.has(token)).length;
+  const union = new Set([...tokensA, ...tokensB]).size;
+
+  return union === 0 ? 0 : intersection / union;
+}
+
+function tokenizeForSimilarity(text: string): Set<string> {
+  const normalized = normalizeText(text);
+  const stopwords = new Set([
+    "the",
+    "and",
+    "for",
+    "with",
+    "that",
+    "this",
+    "from",
+    "into",
+    "will",
+    "should",
+    "step",
+  ]);
+
+  return new Set(
+    normalized
+      .split(/[^a-z0-9-]+/)
+      .map((token) => token.trim())
+      .filter((token) => token.length >= 3 && !stopwords.has(token)),
+  );
+}
+
+function normalizeArtifactSet(artifacts: readonly string[]): string[] {
+  return [...new Set(artifacts)].sort((a, b) => a.localeCompare(b));
 }

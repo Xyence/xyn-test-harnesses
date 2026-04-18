@@ -1,5 +1,5 @@
 import type { Page } from "playwright";
-import { UI_SELECTORS } from "./commandPalette";
+import { getRequiredSelector } from "./selectors";
 
 export interface LoginCheckResult {
   readonly passed: boolean;
@@ -11,8 +11,7 @@ export interface LoginCheckResult {
 }
 
 export async function verifySessionLoaded(page: Page, timeoutMs = 8_000): Promise<LoginCheckResult> {
-  // TODO: Replace marker selector with the canonical authenticated session marker in xyn-ui.
-  const markerSelector = UI_SELECTORS.authLoggedInMarker;
+  const markerSelector = getRequiredSelector("authLoggedInMarker");
 
   const markerVisible = await page
     .locator(markerSelector)
