@@ -1,0 +1,31 @@
+id: phase1_minimal_command_palette_change
+title: "Phase 1 Minimal: Command palette phrase presence"
+request: >
+  Add a minimal command-palette wording update for Deal Finder and produce a sibling build
+  we can verify through the Xyn UI.
+allow_core_bypass: false
+expected_artifacts:
+  - xyn-ui
+expected_primary_artifact: xyn-ui
+optional_artifacts:
+  - deal-finder-harness
+forbidden_artifacts: []
+planner_expectations:
+  should_use_mcp: true
+  should_update_command_palette: true
+  may_require_core_xyn_changes: false
+  success_criteria:
+    - xyn-ui is selected for command palette updates.
+    - Planner provides a minimal implementation plan.
+  required_phrases:
+    - command palette
+    - xyn-ui
+  forbidden_phrases: []
+deployment:
+  mode: preview
+  requires_xyn_api: false
+  require_branch_isolation: true
+  notes: "Minimal UI phrase verification only."
+ui_checks:
+  - type: command_palette_command_present
+    command_text: "Deal Finder"
