@@ -36,6 +36,7 @@ interface CachedTokenAuthProviderOptions {
   readonly tokenFilePath: string;
   readonly googleClientId?: string;
   readonly googleClientSecret?: string;
+  readonly preferredTokenMode?: "access_token" | "id_token";
   readonly minValidityMs?: number;
 }
 
@@ -50,7 +51,7 @@ class CachedTokenAuthProvider implements AuthProvider {
     const tokenPath = path.resolve(process.cwd(), this.options.tokenFilePath);
     const record = await this.readTokenRecord(tokenPath);
 
-    let tokenMode = record.tokenMode ?? "access_token";
+    let tokenMode = this.options.preferredTokenMode ?? record.tokenMode ?? "access_token";
     let selectedToken = this.resolveToken(record, tokenMode);
     let expiresAtIso = this.resolveExpiry(record);
 
@@ -65,7 +66,7 @@ class CachedTokenAuthProvider implements AuthProvider {
     let audience = this.resolveAudience(record, tokenMode, selectedToken);
 
     if (this.isExpiredOrNearExpiry(expiresAtIso)) {
-      const refreshed = await this.tryRefresh(record);
+      const refreshed = await this.tryRefresh(record, tokenMode);
       if (!refreshed) {
         throw new Error(
           `Cached MCP token is expired (expiresAtIso=${expiresAtIso}) and cannot be refreshed automatically`,
@@ -164,6 +165,7 @@ class CachedTokenAuthProvider implements AuthProvider {
 
   private async tryRefresh(
     record: CachedTokenRecord,
+    tokenMode: "access_token" | "id_token",
   ): Promise<
     | {
         tokenMode: "access_token" | "id_token";
@@ -213,7 +215,6 @@ class CachedTokenAuthProvider implements AuthProvider {
       return null;
     }
 
-    const tokenMode = record.tokenMode ?? "access_token";
     const selectedToken = tokenMode === "id_token" ? data.id_token : data.access_token;
     if (!selectedToken) {
       return null;

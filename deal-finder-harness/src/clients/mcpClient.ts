@@ -86,6 +86,11 @@ export interface McpScenarioPlanResult {
   readonly details: string;
   readonly requiresCoreXynChanges: boolean;
   readonly developmentResult?: DevelopmentRequestResult;
+  readonly httpFailure?: {
+    readonly status: number;
+    readonly errorBody: unknown;
+    readonly endpoint: string;
+  };
 }
 
 export interface McpClient {
@@ -170,16 +175,38 @@ export class HttpMcpClient implements McpClient {
       };
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Unknown MCP planning error";
+      const httpFailure =
+        error instanceof McpHttpError
+          ? {
+              status: error.status,
+              errorBody: error.errorBody,
+              endpoint: error.endpoint,
+            }
+          : undefined;
       return {
         ok: false,
         details: `MCP planning failed for '${scenario.id}': ${message}`,
         requiresCoreXynChanges: false,
+        httpFailure,
       };
     }
   }
 }
 
 export async function submitDevelopmentRequest(
+  config: McpDevelopmentConfig,
+  scenario: ScenarioDefinition,
+): Promise<DevelopmentRequestResult> {
+  const endpoints = resolveEndpoints(config.endpoints);
+
+  if (endpoints.submitRequest === "/mcp") {
+    return submitDevelopmentRequestViaMcpProtocol(config, scenario);
+  }
+
+  return submitDevelopmentRequestViaRest(config, scenario);
+}
+
+async function submitDevelopmentRequestViaRest(
   config: McpDevelopmentConfig,
   scenario: ScenarioDefinition,
 ): Promise<DevelopmentRequestResult> {
@@ -199,9 +226,12 @@ export async function submitDevelopmentRequest(
   });
 
   if (!submitResponse.ok) {
-    throw new Error(
-      `submitRequest failed with status ${submitResponse.status}; raw=${safeStringify(submitResponse.data)}`,
-    );
+    throw new McpHttpError({
+      endpoint: endpoints.submitRequest,
+      status: submitResponse.status,
+      errorBody: submitResponse.data,
+      message: `submitRequest failed with status ${submitResponse.status}; raw=${safeStringify(submitResponse.data)}`,
+    });
   }
 
   const requestId = extractFirstString(submitResponse.data, [["requestId"], ["request_id"], ["id"]]) ?? null;
@@ -376,6 +406,379 @@ export async function submitDevelopmentRequest(
   };
 }
 
+interface McpSessionInitResult {
+  readonly sessionId: string;
+  readonly responseBody: string;
+}
+
+async function submitDevelopmentRequestViaMcpProtocol(
+  config: McpDevelopmentConfig,
+  scenario: ScenarioDefinition,
+): Promise<DevelopmentRequestResult> {
+  const token = await config.authTokenProvider();
+  const maxAttempts = 3;
+  let init: McpSessionInitResult | null = null;
+  let listApplications: Record<string, unknown> | null = null;
+  let lastError: unknown = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      init = await initializeMcpSession(config, token);
+      listApplications = await callMcpTool(config, token, init.sessionId, "list_applications", {});
+      break;
+    } catch (error: unknown) {
+      lastError = error;
+      if (!isRetriableToolSurfaceError(error) || attempt === maxAttempts) {
+        throw error;
+      }
+      await sleep(500 * attempt);
+    }
+  }
+
+  if (!init || !listApplications) {
+    throw new Error(
+      `Failed to initialize MCP session/list_applications after retries: ${
+        lastError instanceof Error ? lastError.message : String(lastError)
+      }`,
+    );
+  }
+
+  const applicationId = extractFirstString(listApplications, [["response", "applications", "0", "id"]]);
+
+  if (!applicationId) {
+    throw new Error(`MCP tools/list_applications did not return an application id; raw=${safeStringify(listApplications)}`);
+  }
+
+  const createSession = await callMcpTool(config, token, init.sessionId, "create_application_change_session", {
+    application_id: applicationId,
+    payload: {
+      request_text: scenario.request,
+    },
+  });
+
+  const sessionId =
+    extractFirstString(createSession, [["response", "raw", "session", "id"]]) ??
+    extractFirstString(createSession, [["response", "session_id"]]);
+
+  if (!sessionId) {
+    throw new Error(
+      `MCP create_application_change_session succeeded but session id is missing; raw=${safeStringify(createSession)}`,
+    );
+  }
+
+  const sessionPlan = await callMcpTool(config, token, init.sessionId, "get_application_change_session_plan", {
+    application_id: applicationId,
+    session_id: sessionId,
+  });
+
+  let previewPrep: unknown = null;
+  let previewStatus: unknown = null;
+  try {
+    previewPrep = await callMcpTool(config, token, init.sessionId, "prepare_preview_application_change_session", {
+      application_id: applicationId,
+      session_id: sessionId,
+    });
+  } catch (error: unknown) {
+    previewPrep = {
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+
+  try {
+    previewStatus = await callMcpTool(config, token, init.sessionId, "get_application_change_session_preview_status", {
+      application_id: applicationId,
+      session_id: sessionId,
+    });
+  } catch (error: unknown) {
+    previewStatus = {
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+
+  const rawResponses: MutableRawResponses = {
+    submitRequest: {
+      mcpInitialize: init.responseBody,
+      listApplications,
+      createSession,
+      previewPrep,
+    },
+    artifactSelection: createSession,
+    plannerOutput: sessionPlan,
+    siblingInfo: previewStatus,
+    siblingUrl: previewStatus,
+    branchInfo: previewStatus,
+  };
+
+  const selectedArtifacts =
+    extractArtifactTitles(createSession) ??
+    extractFirstStringArray(createSession, [
+      ["response", "selected_artifacts"],
+      ["response", "selected_artifact_ids"],
+      ["response", "change_session_handle", "artifact_scope"],
+    ]);
+
+  const primaryArtifact =
+    extractFirstString(createSession, [
+      ["response", "raw", "session", "selected_artifacts", "0", "artifact_title"],
+      ["response", "raw", "session", "analysis", "impacted_artifacts", "0", "artifact_title"],
+      ["response", "primary_artifact_id"],
+    ]) ?? "";
+
+  const dependentArtifacts =
+    extractFirstStringArray(createSession, [
+      ["response", "raw", "session", "dependent_artifact_ids"],
+      ["response", "dependent_artifact_ids"],
+    ]) ??
+    (selectedArtifacts && primaryArtifact
+      ? selectedArtifacts.filter((artifact) => artifact !== primaryArtifact)
+      : undefined);
+
+  const artifactDetails = extractArtifactDetails(createSession) ?? [];
+
+  const plannerPlan =
+    extractFirstKnown(sessionPlan, [
+      ["response", "raw", "control", "session", "planning"],
+      ["response", "planner_prompt"],
+      ["response"],
+    ]) ??
+    extractFirstKnown(createSession, [["response", "raw", "session", "planning"]]);
+
+  const siblingId = sessionId;
+  const siblingUrl =
+    extractFirstString(previewStatus, [
+      ["response", "preview", "primary_url"],
+      ["response", "preview_urls", "0"],
+      ["response", "raw", "control", "preview_target", "primary_url"],
+    ]) ??
+    extractFirstString(createSession, [["base_url"]]);
+
+  const branchName =
+    extractFirstString(previewStatus, [
+      ["response", "raw", "control", "root_target_identity", "branch"],
+      ["response", "raw", "control", "root_target_identity", "branch_name"],
+    ]) ?? "";
+
+  const missing: string[] = [];
+  if (!selectedArtifacts || selectedArtifacts.length === 0) {
+    missing.push("selectedArtifacts");
+  }
+  if (!primaryArtifact) {
+    missing.push("primaryArtifact");
+  }
+  if (!plannerPlan) {
+    missing.push("plannerPlan");
+  }
+  if (!siblingId) {
+    missing.push("siblingId");
+  }
+  if (!siblingUrl) {
+    missing.push("siblingUrl");
+  }
+  if (!dependentArtifacts) {
+    missing.push("dependentArtifacts");
+  }
+
+  if (missing.length > 0) {
+    throw new Error(
+      `Missing required MCP protocol fields: ${missing.join(", ")}; rawResponses=${safeStringify(rawResponses)}`,
+    );
+  }
+
+  const requiredSelectedArtifacts = selectedArtifacts as string[];
+  const requiredDependentArtifacts = dependentArtifacts as string[];
+  const requiredSiblingUrl = siblingUrl as string;
+
+  return {
+    requestText: scenario.request,
+    selectedArtifacts: requiredSelectedArtifacts,
+    primaryArtifact,
+    dependentArtifacts: requiredDependentArtifacts,
+    artifactDetails,
+    plannerPlan,
+    siblingId,
+    siblingUrl: requiredSiblingUrl,
+    branchName,
+    rawResponses,
+  };
+}
+
+function isRetriableToolSurfaceError(error: unknown): boolean {
+  if (!(error instanceof McpHttpError)) {
+    return false;
+  }
+
+  if (error.status !== 503) {
+    return false;
+  }
+
+  const bodyText = safeStringify(error.errorBody).toLowerCase();
+  return bodyText.includes("empty_tool_surface");
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+async function initializeMcpSession(
+  config: McpDevelopmentConfig,
+  token: string,
+): Promise<McpSessionInitResult> {
+  const endpoint = "/mcp";
+  const url = new URL(endpoint, config.baseUrl).toString();
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json",
+      accept: "application/json, text/event-stream",
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: "harness-init",
+      method: "initialize",
+      params: {
+        protocolVersion: "2025-03-26",
+        capabilities: {},
+        clientInfo: {
+          name: "deal-finder-harness",
+          version: "1.0.0",
+        },
+      },
+    }),
+  });
+
+  const responseBody = await response.text().catch(() => "");
+  if (!response.ok) {
+    throw new McpHttpError({
+      endpoint,
+      status: response.status,
+      errorBody: responseBody,
+      message: `MCP initialize failed with status ${response.status}; raw=${responseBody.slice(0, 800)}`,
+    });
+  }
+
+  const sessionId = response.headers.get("mcp-session-id");
+  if (!sessionId) {
+    throw new Error(`MCP initialize succeeded but mcp-session-id header is missing; raw=${responseBody.slice(0, 800)}`);
+  }
+
+  return {
+    sessionId,
+    responseBody,
+  };
+}
+
+async function callMcpTool(
+  config: McpDevelopmentConfig,
+  token: string,
+  sessionId: string,
+  toolName: string,
+  args: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const endpoint = "/mcp";
+  const url = new URL(endpoint, config.baseUrl).toString();
+  const requestId = `tool-${toolName}-${Date.now()}`;
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "mcp-session-id": sessionId,
+      "content-type": "application/json",
+      accept: "application/json, text/event-stream",
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: requestId,
+      method: "tools/call",
+      params: {
+        name: toolName,
+        arguments: args,
+      },
+    }),
+  });
+
+  const responseBody = await response.text().catch(() => "");
+  if (!response.ok) {
+    throw new McpHttpError({
+      endpoint,
+      status: response.status,
+      errorBody: responseBody,
+      message: `MCP tool '${toolName}' failed with status ${response.status}; raw=${responseBody.slice(0, 800)}`,
+    });
+  }
+
+  const parsed = parseMcpStreamResponse(responseBody);
+  const structured = getByPath(parsed, ["result", "structuredContent", "result"]) as
+    | Record<string, unknown>
+    | undefined;
+  const toolResult = (structured ?? parsed) as Record<string, unknown>;
+
+  const ok = extractBooleanFromUnknown(toolResult, [["ok"]]);
+  if (!ok && toolResult.ok !== undefined) {
+    const status = extractFirstNumber(toolResult, [["status_code"]]) ?? 400;
+    throw new McpHttpError({
+      endpoint,
+      status,
+      errorBody: toolResult,
+      message: `MCP tool '${toolName}' reported failure; raw=${safeStringify(toolResult)}`,
+    });
+  }
+
+  return toolResult;
+}
+
+function parseMcpStreamResponse(body: string): Record<string, unknown> {
+  const dataLine = body
+    .split(/\r?\n/)
+    .find((line) => line.startsWith("data: "))
+    ?.replace(/^data:\s*/, "");
+
+  if (!dataLine) {
+    throw new Error(`MCP response missing SSE data payload; raw=${body.slice(0, 800)}`);
+  }
+
+  try {
+    return JSON.parse(dataLine) as Record<string, unknown>;
+  } catch (error: unknown) {
+    throw new Error(
+      `Failed to parse MCP SSE data payload: ${error instanceof Error ? error.message : String(error)}; raw=${dataLine.slice(0, 800)}`,
+    );
+  }
+}
+
+function extractArtifactTitles(value: unknown): string[] | undefined {
+  const paths = [
+    ["response", "raw", "session", "selected_artifacts"],
+    ["response", "raw", "session", "analysis", "impacted_artifacts"],
+  ] as const;
+
+  for (const path of paths) {
+    const candidate = getByPath(value, path);
+    if (!Array.isArray(candidate)) {
+      continue;
+    }
+
+    const titles = candidate
+      .map((item) => {
+        if (typeof item !== "object" || item === null) {
+          return undefined;
+        }
+        const record = item as Record<string, unknown>;
+        return asNonEmptyString(record.artifact_title) ?? asNonEmptyString(record.artifact_slug);
+      })
+      .filter((item): item is string => Boolean(item));
+
+    if (titles.length > 0) {
+      return titles;
+    }
+  }
+
+  return undefined;
+}
+
 export function buildHttpMcpClient(config: McpDevelopmentConfig): McpClient {
   return new HttpMcpClient(config);
 }
@@ -420,7 +823,30 @@ async function requestOptionalEndpoint(
     },
   });
 
+  if (!response.ok) {
+    throw new McpHttpError({
+      endpoint,
+      status: response.status,
+      errorBody: response.data,
+      message: `Optional MCP endpoint '${endpoint}' failed with status ${response.status}; raw=${safeStringify(response.data)}`,
+    });
+  }
+
   return response.data;
+}
+
+class McpHttpError extends Error {
+  readonly status: number;
+  readonly errorBody: unknown;
+  readonly endpoint: string;
+
+  constructor(args: { status: number; errorBody: unknown; endpoint: string; message: string }) {
+    super(args.message);
+    this.name = "McpHttpError";
+    this.status = args.status;
+    this.errorBody = args.errorBody;
+    this.endpoint = args.endpoint;
+  }
 }
 
 function extractArtifactDetails(value: unknown): ArtifactSelectionDetail[] | undefined {
@@ -515,6 +941,22 @@ function extractFirstString(value: unknown, paths: readonly (readonly string[])[
     const candidate = getByPath(value, path);
     if (typeof candidate === "string" && candidate.length > 0) {
       return candidate;
+    }
+  }
+  return undefined;
+}
+
+function extractFirstNumber(value: unknown, paths: readonly (readonly string[])[]): number | undefined {
+  for (const path of paths) {
+    const candidate = getByPath(value, path);
+    if (typeof candidate === "number" && Number.isFinite(candidate)) {
+      return candidate;
+    }
+    if (typeof candidate === "string" && candidate.trim().length > 0) {
+      const parsed = Number(candidate);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
     }
   }
   return undefined;

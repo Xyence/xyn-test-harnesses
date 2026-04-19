@@ -16,6 +16,7 @@ const EnvSchema = z.object({
   XYN_UI_BASE_URL: z.string().url(),
   MCP_SERVER_ID: z.string().min(1),
   MCP_BASE_URL: z.string().url(),
+  MCP_AUTH_TOKEN_MODE: z.enum(["access_token", "id_token"]).default("access_token"),
   MCP_AUTH_TOKEN_FILE: z.string().default("./.auth/mcp-token.json"),
   GOOGLE_OAUTH_CLIENT_ID: z.string().optional(),
   GOOGLE_OAUTH_CLIENT_SECRET: z.string().optional(),

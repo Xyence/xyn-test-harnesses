@@ -88,7 +88,6 @@ async function main(): Promise<void> {
     state,
     scopes: config.GOOGLE_OAUTH_SCOPES,
     codeChallenge,
-    audience: config.MCP_ID_TOKEN_AUDIENCE,
   });
 
   const authCodePromise = waitForAuthorizationCode({
@@ -125,7 +124,9 @@ async function main(): Promise<void> {
     !audienceIncludes(diagnostics.audience, config.MCP_ID_TOKEN_AUDIENCE)
   ) {
     throw new Error(
-      `Configured MCP_ID_TOKEN_AUDIENCE '${config.MCP_ID_TOKEN_AUDIENCE}' does not match token audience '${String(diagnostics.audience)}'`,
+      `Configured MCP_ID_TOKEN_AUDIENCE '${config.MCP_ID_TOKEN_AUDIENCE}' does not match token audience '${String(
+        diagnostics.audience,
+      )}'. In Google OAuth authorization-code flow, ID token audience is typically the OAuth client ID, not an arbitrary URL audience.`,
     );
   }
 
@@ -182,7 +183,6 @@ function buildAuthUrl(args: {
   state: string;
   scopes: string;
   codeChallenge: string;
-  audience?: string;
 }): string {
   const params = new URLSearchParams({
     client_id: args.clientId,
@@ -195,11 +195,6 @@ function buildAuthUrl(args: {
     code_challenge: args.codeChallenge,
     code_challenge_method: "S256",
   });
-
-  if (args.audience) {
-    // TODO: Confirm audience query behavior for your Google OAuth client configuration.
-    params.set("audience", args.audience);
-  }
 
   return `${args.authorizationEndpoint}?${params.toString()}`;
 }

@@ -65,6 +65,7 @@ interface ScenarioRunnerDependencies {
   readonly uiVerifier: CommandPaletteVerifier;
   readonly coreBypassRunner: CoreBypassRunner;
   readonly verificationRunner: VerificationRunner;
+  readonly configuredTokenMode: "access_token" | "id_token";
 }
 
 const MISSING_DEVELOPMENT_RESULT_ARTIFACT_CHECK: ArtifactSelectionCheckResult = {
@@ -156,7 +157,7 @@ export class ScenarioRunner {
   constructor(private readonly deps: ScenarioRunnerDependencies) {}
 
   async runSequentially(scenarios: readonly ScenarioDefinition[]): Promise<HarnessRunReport> {
-    await this.deps.authProvider.getSession();
+    const authSession = await this.deps.authProvider.getSession();
 
     const scenarioResults: ScenarioRunResult[] = [];
 
@@ -165,6 +166,16 @@ export class ScenarioRunner {
       const mcpResult = await this.deps.mcpClient.planScenario(scenario);
 
       if (!mcpResult.ok || !mcpResult.developmentResult) {
+        console.error("MCP planning failed", {
+          scenarioId: scenario.id,
+          endpoint: mcpResult.httpFailure?.endpoint ?? null,
+          httpStatus: mcpResult.httpFailure?.status ?? null,
+          errorBody: mcpResult.httpFailure?.errorBody ?? null,
+          tokenMode: this.deps.configuredTokenMode,
+          tokenType: authSession.tokenType,
+          audience: authSession.audience,
+        });
+
         scenarioResults.push({
           scenarioId: scenario.id,
           title: scenario.title,
@@ -187,6 +198,14 @@ export class ScenarioRunner {
         });
         continue;
       }
+
+      console.log("MCP planning succeeded", {
+        scenarioId: scenario.id,
+        selectedArtifacts: mcpResult.developmentResult.selectedArtifacts,
+        primaryArtifact: mcpResult.developmentResult.primaryArtifact,
+        siblingId: mcpResult.developmentResult.siblingId,
+        siblingUrl: mcpResult.developmentResult.siblingUrl,
+      });
 
       const artifactSelectionCheck = runArtifactSelectionCheck(scenario, mcpResult.developmentResult);
       const plannerCheck = runPlannerCheck(scenario, mcpResult.developmentResult);
@@ -240,7 +259,22 @@ export class ScenarioRunner {
         verification.passed;
 
       for (const check of scenario.ui_checks) {
-        const uiResult = await runUiCheck(check, this.deps.uiVerifier);
+        let uiResult: StructuredCheckResult;
+        try {
+          uiResult = await runUiCheck(check, this.deps.uiVerifier);
+        } catch (error: unknown) {
+          uiResult = {
+            checkType: check.type,
+            status: "failed",
+            message:
+              error instanceof Error
+                ? `UI check execution failed: ${error.message}`
+                : "UI check execution failed with unknown error",
+            details: {
+              error: error instanceof Error ? error.stack ?? error.message : String(error),
+            },
+          };
+        }
         uiResults.push(uiResult);
         if (uiResult.status === "failed") {
           scenarioPassed = false;
