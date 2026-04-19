@@ -1,0 +1,43 @@
+id: phase1_datasource_crud_flow
+title: "Phase1 DataSource CRUD Flow"
+request: >
+  Implement Deal Finder data source CRUD commands in the command palette and verify create,
+  update, and delete behavior in the UI flow.
+allow_core_bypass: false
+expected_artifacts:
+  - xyn-ui
+expected_primary_artifact: xyn-ui
+optional_artifacts:
+  - xyn-api
+  - deal-finder-harness
+forbidden_artifacts: []
+accepted_dependency_reasons:
+  - ui_depends_on_shared_command_schema
+  - ui_command_requires_api_route_registration
+planner_expectations:
+  should_use_mcp: true
+  should_update_command_palette: true
+  may_require_core_xyn_changes: false
+  success_criteria:
+    - Planner defines command palette CRUD steps.
+    - Planner defines UI verification for create/update/delete.
+  required_phrases:
+    - data source
+    - create
+    - update
+    - delete
+  forbidden_phrases: []
+deployment:
+  mode: preview
+  requires_xyn_api: false
+  require_branch_isolation: true
+ui_checks:
+  - type: command_palette_command_present
+    command_text: "Create data source"
+  - type: datasource_create
+    datasource_name: "Deal Finder Scenario Source"
+  - type: datasource_update
+    datasource_id: "ds-deal-finder-scenario-source"
+    expected_field: "name"
+  - type: datasource_delete
+    datasource_id: "ds-deal-finder-scenario-source"

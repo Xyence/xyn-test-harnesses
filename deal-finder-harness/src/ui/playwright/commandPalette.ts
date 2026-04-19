@@ -78,6 +78,234 @@ class PlaywrightCommandPaletteVerifier implements CommandPaletteVerifier {
   }
 
   async runCommandPaletteCommandPresent(commandText: string): Promise<UiActionResult> {
+    return this.withSession("command-presence", async (page, diagnostics, screenshotPaths) => {
+      const runResult = await searchCommandInPalette(page, commandText);
+      diagnostics.push(...runResult.details);
+      screenshotPaths.push(await this.captureScreenshot(page, "command-search"));
+
+      if (!runResult.passed) {
+        return {
+          ok: false,
+          message: `Command phrase '${commandText}' not found in command palette results`,
+          stepDiagnostics: diagnostics,
+          screenshotPaths,
+          observedState: runResult.observed,
+        };
+      }
+
+      return {
+        ok: true,
+        message: `Command phrase '${commandText}' found in command palette results`,
+        stepDiagnostics: diagnostics,
+        screenshotPaths,
+        observedState: runResult.observed,
+      };
+    });
+  }
+
+  async runDataSourceCreate(dataSourceName: string): Promise<UiActionResult> {
+    return this.runDataSourceCrudAction({
+      label: "datasource-create",
+      command: `Create data source ${dataSourceName}`,
+      rowText: dataSourceName,
+      expectedState: "present_unique",
+      messageOnSuccess: `Datasource '${dataSourceName}' created and visible in UI state`,
+    });
+  }
+
+  async runDataSourceUpdate(dataSourceId: string, expectedField: string): Promise<UiActionResult> {
+    return this.runDataSourceCrudAction({
+      label: "datasource-update",
+      command: `Update data source ${dataSourceId}`,
+      rowText: dataSourceId,
+      expectedState: "present_unique",
+      expectedFieldToken: expectedField,
+      messageOnSuccess: `Datasource '${dataSourceId}' updated and field '${expectedField}' is visible`,
+    });
+  }
+
+  async runDataSourceDelete(dataSourceId: string): Promise<UiActionResult> {
+    return this.runDataSourceCrudAction({
+      label: "datasource-delete",
+      command: `Delete data source ${dataSourceId}`,
+      rowText: dataSourceId,
+      expectedState: "absent",
+      messageOnSuccess: `Datasource '${dataSourceId}' deleted and no longer visible`,
+    });
+  }
+
+  async selectMapAreaAndResolveProperties(_area: MapSelectionArea): Promise<MapSelectionResult> {
+    return {
+      implemented: false,
+      resolvedProperties: [],
+      message: "map_select_area_resolves_properties not implemented in real verifier yet",
+    };
+  }
+
+  private async runDataSourceCrudAction(params: {
+    label: string;
+    command: string;
+    rowText: string;
+    expectedState: "present_unique" | "absent";
+    expectedFieldToken?: string;
+    messageOnSuccess: string;
+  }): Promise<UiActionResult> {
+    return this.withSession(params.label, async (page, diagnostics, screenshotPaths) => {
+      const commandRun = await executeCommandInPalette(page, params.command);
+      diagnostics.push(...commandRun.details);
+      screenshotPaths.push(await this.captureScreenshot(page, `${params.label}-after-command`));
+
+      if (!commandRun.passed) {
+        return {
+          ok: false,
+          message: `Command execution did not produce expected palette state for '${params.command}'`,
+          stepDiagnostics: diagnostics,
+          screenshotPaths,
+          observedState: {
+            command: commandRun.observed,
+          },
+        };
+      }
+
+      const listSelector = getRequiredSelector("dataSourceList");
+      const rowSelector = getRequiredSelector("dataSourceRow");
+      const toastSelector = getRequiredSelector("dataSourceToast");
+
+      const listVisible = await page
+        .locator(listSelector)
+        .first()
+        .isVisible({ timeout: 10_000 })
+        .catch(() => false);
+      if (!listVisible) {
+        screenshotPaths.push(await this.captureScreenshot(page, `${params.label}-list-missing`));
+        return {
+          ok: false,
+          message: "Datasource list is not visible after command execution",
+          stepDiagnostics: diagnostics,
+          screenshotPaths,
+          observedState: {
+            command: commandRun.observed,
+            listSelector,
+            listVisible,
+          },
+        };
+      }
+
+      const rowLocator = page.locator(rowSelector).filter({ hasText: params.rowText });
+      const rowMatchCount = await rowLocator.count();
+      const rowFirstText = rowMatchCount > 0 ? await rowLocator.first().innerText().catch(() => "") : "";
+      const toastText = await page.locator(toastSelector).first().innerText().catch(() => "");
+
+      diagnostics.push(`Datasource row matches for '${params.rowText}': ${rowMatchCount}`);
+
+      if (params.expectedState === "present_unique") {
+        if (rowMatchCount === 0) {
+          screenshotPaths.push(await this.captureScreenshot(page, `${params.label}-row-not-found`));
+          return {
+            ok: false,
+            message: `Datasource row '${params.rowText}' was not found`,
+            stepDiagnostics: diagnostics,
+            screenshotPaths,
+            observedState: {
+              command: commandRun.observed,
+              rowText: params.rowText,
+              rowMatchCount,
+              rowFirstText,
+              toastText,
+            },
+          };
+        }
+
+        if (rowMatchCount > 1) {
+          screenshotPaths.push(await this.captureScreenshot(page, `${params.label}-ambiguous-row`));
+          return {
+            ok: false,
+            message: `Ambiguous datasource verification: expected a unique row for '${params.rowText}', found ${rowMatchCount}`,
+            stepDiagnostics: diagnostics,
+            screenshotPaths,
+            observedState: {
+              command: commandRun.observed,
+              rowText: params.rowText,
+              rowMatchCount,
+              rowFirstText,
+              toastText,
+            },
+          };
+        }
+
+        if (params.expectedFieldToken) {
+          const hasFieldToken = rowFirstText.toLowerCase().includes(params.expectedFieldToken.toLowerCase());
+          if (!hasFieldToken) {
+            screenshotPaths.push(await this.captureScreenshot(page, `${params.label}-field-missing`));
+            return {
+              ok: false,
+              message: `Datasource row does not include expected field token '${params.expectedFieldToken}'`,
+              stepDiagnostics: diagnostics,
+              screenshotPaths,
+              observedState: {
+                command: commandRun.observed,
+                rowText: params.rowText,
+                rowMatchCount,
+                rowFirstText,
+                expectedFieldToken: params.expectedFieldToken,
+                toastText,
+              },
+            };
+          }
+        }
+      }
+
+      if (params.expectedState === "absent") {
+        if (rowMatchCount > 0) {
+          screenshotPaths.push(await this.captureScreenshot(page, `${params.label}-row-still-visible`));
+          return {
+            ok: false,
+            message: `Datasource '${params.rowText}' still appears in UI after delete command`,
+            stepDiagnostics: diagnostics,
+            screenshotPaths,
+            observedState: {
+              command: commandRun.observed,
+              rowText: params.rowText,
+              rowMatchCount,
+              rowFirstText,
+              toastText,
+            },
+          };
+        }
+      }
+
+      screenshotPaths.push(await this.captureScreenshot(page, `${params.label}-verified`));
+      return {
+        ok: true,
+        message: params.messageOnSuccess,
+        stepDiagnostics: diagnostics,
+        screenshotPaths,
+        observedState: {
+          command: commandRun.observed,
+          rowText: params.rowText,
+          rowMatchCount,
+          rowFirstText,
+          expectedState: params.expectedState,
+          expectedFieldToken: params.expectedFieldToken ?? null,
+          toastText,
+        },
+      };
+    });
+  }
+
+  private notImplementedResult(message: string): UiActionResult {
+    return {
+      ok: false,
+      message,
+      stepDiagnostics: [message],
+      screenshotPaths: [],
+    };
+  }
+
+  private async withSession(
+    label: string,
+    fn: (page: Page, diagnostics: string[], screenshotPaths: string[]) => Promise<UiActionResult>,
+  ): Promise<UiActionResult> {
     const diagnostics: string[] = [];
     const screenshotPaths: string[] = [];
 
@@ -107,56 +335,32 @@ class PlaywrightCommandPaletteVerifier implements CommandPaletteVerifier {
       const sessionCheck = await verifySessionLoaded(session.page);
       diagnostics.push(...sessionCheck.details);
       if (!sessionCheck.passed) {
-        screenshotPaths.push(await this.captureScreenshot(session.page, "auth-session-missing"));
+        screenshotPaths.push(await this.captureScreenshot(session.page, `${label}-auth-session-missing`));
         return {
           ok: false,
           message: "Authenticated session verification failed",
           stepDiagnostics: diagnostics,
           screenshotPaths,
-          observedState: {
-            session: sessionCheck.observed,
-          },
+          observedState: { session: sessionCheck.observed },
         };
       }
 
       const shellCheck = await assertAppShellLoads(session.page);
       diagnostics.push(...shellCheck.details);
       if (!shellCheck.passed) {
-        screenshotPaths.push(await this.captureScreenshot(session.page, "app-shell-missing"));
+        screenshotPaths.push(await this.captureScreenshot(session.page, `${label}-app-shell-missing`));
         return {
           ok: false,
           message: "App shell did not load",
           stepDiagnostics: diagnostics,
           screenshotPaths,
-          observedState: {
-            appShell: shellCheck.observed,
-          },
+          observedState: { appShell: shellCheck.observed },
         };
       }
 
-      const runResult = await searchCommandInPalette(session.page, commandText);
-      diagnostics.push(...runResult.details);
-      screenshotPaths.push(await this.captureScreenshot(session.page, "command-search"));
-
-      if (!runResult.passed) {
-        return {
-          ok: false,
-          message: `Command phrase '${commandText}' not found in command palette results`,
-          stepDiagnostics: diagnostics,
-          screenshotPaths,
-          observedState: runResult.observed,
-        };
-      }
-
-      return {
-        ok: true,
-        message: `Command phrase '${commandText}' found in command palette results`,
-        stepDiagnostics: diagnostics,
-        screenshotPaths,
-        observedState: runResult.observed,
-      };
+      return await fn(session.page, diagnostics, screenshotPaths);
     } catch (error: unknown) {
-      screenshotPaths.push(await this.captureScreenshot(session.page, "command-search-exception").catch(() => ""));
+      screenshotPaths.push(await this.captureScreenshot(session.page, `${label}-exception`).catch(() => ""));
       return {
         ok: false,
         message: error instanceof Error ? error.message : "Command palette verification failed",
@@ -166,35 +370,6 @@ class PlaywrightCommandPaletteVerifier implements CommandPaletteVerifier {
     } finally {
       await session.close();
     }
-  }
-
-  async runDataSourceCreate(_dataSourceName: string): Promise<UiActionResult> {
-    return this.notImplementedResult("datasource_create not implemented in real verifier yet");
-  }
-
-  async runDataSourceUpdate(_dataSourceId: string, _expectedField: string): Promise<UiActionResult> {
-    return this.notImplementedResult("datasource_update not implemented in real verifier yet");
-  }
-
-  async runDataSourceDelete(_dataSourceId: string): Promise<UiActionResult> {
-    return this.notImplementedResult("datasource_delete not implemented in real verifier yet");
-  }
-
-  async selectMapAreaAndResolveProperties(_area: MapSelectionArea): Promise<MapSelectionResult> {
-    return {
-      implemented: false,
-      resolvedProperties: [],
-      message: "map_select_area_resolves_properties not implemented in real verifier yet",
-    };
-  }
-
-  private notImplementedResult(message: string): UiActionResult {
-    return {
-      ok: false,
-      message,
-      stepDiagnostics: [message],
-      screenshotPaths: [],
-    };
   }
 
   private async ensureScreenshotsDir(): Promise<void> {
@@ -234,6 +409,45 @@ export async function openCommandPalette(page: Page, timeoutMs = 10_000): Promis
 
   await page.waitForSelector(paletteInputSelector, { timeout: timeoutMs });
   return true;
+}
+
+async function executeCommandInPalette(page: Page, command: string): Promise<CommandPaletteRunResult> {
+  const details: string[] = [];
+  const paletteInputSelector = getRequiredSelector("commandPaletteInput");
+  const paletteResultsSelector = getRequiredSelector("commandPaletteResults");
+
+  const paletteOpened = await openCommandPalette(page).catch(() => false);
+  if (!paletteOpened) {
+    return {
+      passed: false,
+      details: ["Command palette could not be opened"],
+      observed: {
+        command,
+        paletteOpened: false,
+        resultText: "",
+      },
+    };
+  }
+
+  const input = page.locator(paletteInputSelector).first();
+  await input.fill(command);
+  details.push(`Filled command palette input with '${command}'`);
+
+  await page.keyboard.press("Enter");
+  details.push("Submitted command from command palette");
+
+  await page.waitForTimeout(800);
+  const resultText = await page.locator(paletteResultsSelector).first().innerText().catch(() => "");
+
+  return {
+    passed: true,
+    details,
+    observed: {
+      command,
+      paletteOpened: true,
+      resultText,
+    },
+  };
 }
 
 async function searchCommandInPalette(page: Page, command: string): Promise<CommandPaletteRunResult> {
