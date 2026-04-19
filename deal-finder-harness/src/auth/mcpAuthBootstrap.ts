@@ -20,7 +20,9 @@ const AuthConfigSchema = z.object({
   MCP_AUTH_CALLBACK_PORT: z.coerce.number().int().positive().default(8787),
   MCP_AUTH_TIMEOUT_MS: z.coerce.number().int().positive().default(180000),
   GOOGLE_OAUTH_CLIENT_ID: z.string().optional(),
+  GOOGLE_OAUTH_CLIENT_SECRET: z.string().optional(),
   XYN_OIDC_CLIENT_ID: z.string().optional(),
+  XYN_OIDC_CLIENT_SECRET: z.string().optional(),
   GOOGLE_OAUTH_SCOPES: z.string().default("openid email profile"),
 });
 
@@ -69,6 +71,7 @@ async function main(): Promise<void> {
 
   const config = parseConfig();
   const clientId = config.GOOGLE_OAUTH_CLIENT_ID ?? config.XYN_OIDC_CLIENT_ID;
+  const clientSecret = config.GOOGLE_OAUTH_CLIENT_SECRET ?? config.XYN_OIDC_CLIENT_SECRET;
   if (!clientId) {
     throw new Error("Missing GOOGLE_OAUTH_CLIENT_ID (or XYN_OIDC_CLIENT_ID) in environment");
   }
@@ -95,13 +98,19 @@ async function main(): Promise<void> {
     timeoutMs: config.MCP_AUTH_TIMEOUT_MS,
   });
 
-  await openInBrowser(authUrl);
-  console.log("Opened Google OAuth login in browser");
+  console.log(`OAuth URL: ${authUrl}`);
+  try {
+    await openInBrowser(authUrl);
+    console.log("Opened Google OAuth login in browser");
+  } catch (error) {
+    console.warn("Could not auto-open browser; open the OAuth URL manually.", error);
+  }
 
   const authCode = await authCodePromise;
   const tokenResponse = await exchangeCodeForTokens({
     tokenEndpoint: TOKEN_ENDPOINT,
     clientId,
+    clientSecret,
     callbackUrl,
     codeVerifier,
     authCode,
@@ -264,6 +273,7 @@ function waitForAuthorizationCode(args: {
 async function exchangeCodeForTokens(args: {
   tokenEndpoint: string;
   clientId: string;
+  clientSecret?: string;
   callbackUrl: string;
   codeVerifier: string;
   authCode: string;
@@ -275,6 +285,9 @@ async function exchangeCodeForTokens(args: {
     redirect_uri: args.callbackUrl,
     code_verifier: args.codeVerifier,
   });
+  if (args.clientSecret) {
+    body.set("client_secret", args.clientSecret);
+  }
 
   const response = await fetch(args.tokenEndpoint, {
     method: "POST",
@@ -286,6 +299,13 @@ async function exchangeCodeForTokens(args: {
 
   const data = (await response.json().catch(() => ({}))) as TokenResponse;
   if (!response.ok) {
+    const errorDescription =
+      typeof data.error_description === "string" ? data.error_description : undefined;
+    if (!args.clientSecret && errorDescription?.toLowerCase().includes("client_secret is missing")) {
+      throw new Error(
+        `Token exchange failed (${response.status}): ${JSON.stringify(data)}. Add GOOGLE_OAUTH_CLIENT_SECRET (or XYN_OIDC_CLIENT_SECRET) to .env for this OAuth client.`,
+      );
+    }
     throw new Error(`Token exchange failed (${response.status}): ${JSON.stringify(data)}`);
   }
 
