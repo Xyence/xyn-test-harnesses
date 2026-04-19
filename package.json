@@ -1,0 +1,7 @@
+{
+  "name": "xyn-test-harnesses",
+  "private": true,
+  "workspaces": [
+    "deal-finder-harness"
+  ]
+}
