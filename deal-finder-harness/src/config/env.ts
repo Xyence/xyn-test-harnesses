@@ -13,8 +13,6 @@ const EnvSchema = z.object({
     .default("info")
     .transform((value) => value.toLowerCase())
     .pipe(z.enum(["debug", "info", "warn", "error"])),
-  XYN_UI_BASE_URL: z.string().url(),
-  MCP_SERVER_ID: z.string().min(1),
   MCP_BASE_URL: z.string().url(),
   MCP_AUTH_TOKEN_MODE: z.enum(["access_token", "id_token"]).default("access_token"),
   MCP_AUTH_TOKEN_FILE: z.string().default("./.auth/mcp-token.json"),
@@ -29,12 +27,7 @@ const EnvSchema = z.object({
   MCP_ENDPOINT_SIBLING_URL: z.string().min(1).optional(),
   MCP_ENDPOINT_BRANCH_INFO: z.string().min(1).optional(),
   ARTIFACTS_DIR: z.string().default("./artifacts"),
-  PLAYWRIGHT_STORAGE_STATE: z.string().min(1).default("./artifacts/playwright/storage-state.json"),
-  PLAYWRIGHT_HEADLESS: z
-    .string()
-    .optional()
-    .transform((value) => (value ?? "true").toLowerCase() !== "false"),
-  HARNESS_SCENARIO_ID: z.string().min(1).default("phase1_minimal_command_palette_change"),
+  HARNESS_SCENARIO_ID: z.string().min(1).default("mcp_create_campaign"),
 });
 
 export type HarnessEnv = z.infer<typeof EnvSchema>;

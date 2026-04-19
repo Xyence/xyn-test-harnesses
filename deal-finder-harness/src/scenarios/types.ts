@@ -9,73 +9,39 @@ const DeploymentSchema = z.object({
 
 const PlannerExpectationsSchema = z.object({
   should_use_mcp: z.boolean().default(true),
-  should_update_command_palette: z.boolean().default(true),
   may_require_core_xyn_changes: z.boolean().default(false),
   success_criteria: z.array(z.string().min(1)).min(1),
   required_phrases: z.array(z.string().min(1)).default([]),
   forbidden_phrases: z.array(z.string().min(1)).default([]),
 });
 
-const MapSelectionAreaSchema = z.object({
-  north: z.number(),
-  south: z.number(),
-  east: z.number(),
-  west: z.number(),
+const ExpectedEntitySchema = z.object({
+  type: z.string().min(1),
+  id: z.string().optional(),
+  name_contains: z.string().optional(),
 });
 
-const CampaignCreateCheckSchema = z.object({
-  type: z.literal("campaign_create"),
-  campaign_name: z.string().min(1),
+const ExpectedResponseFieldSchema = z.object({
+  path: z.string().min(1),
+  equals: z.union([z.string(), z.number(), z.boolean()]).optional(),
+  contains: z.string().optional(),
 });
 
-const CampaignUpdateCheckSchema = z.object({
-  type: z.literal("campaign_update"),
-  campaign_id: z.string().min(1),
-  expected_field: z.string().min(1),
+const ExpectedNotificationSchema = z.object({
+  channel: z.string().optional(),
+  event: z.string().optional(),
+  message_contains: z.string().optional(),
 });
 
-const CampaignDeleteCheckSchema = z.object({
-  type: z.literal("campaign_delete"),
-  campaign_id: z.string().min(1),
+const McpAssertionsSchema = z.object({
+  expected_operations: z.array(z.string().min(1)).default([]),
+  expected_entities_created: z.array(ExpectedEntitySchema).default([]),
+  expected_entities_updated: z.array(ExpectedEntitySchema).default([]),
+  expected_response_fields: z.array(ExpectedResponseFieldSchema).default([]),
+  expected_notifications: z.array(ExpectedNotificationSchema).default([]),
+  require_sibling_metadata: z.boolean().default(false),
+  require_url_check: z.boolean().default(false),
 });
-
-const CommandPaletteCommandPresentCheckSchema = z.object({
-  type: z.literal("command_palette_command_present"),
-  command_text: z.string().min(1),
-});
-
-const DataSourceCreateCheckSchema = z.object({
-  type: z.literal("datasource_create"),
-  datasource_name: z.string().min(1),
-});
-
-const DataSourceUpdateCheckSchema = z.object({
-  type: z.literal("datasource_update"),
-  datasource_id: z.string().min(1),
-  expected_field: z.string().min(1),
-});
-
-const DataSourceDeleteCheckSchema = z.object({
-  type: z.literal("datasource_delete"),
-  datasource_id: z.string().min(1),
-});
-
-const MapSelectionCheckSchema = z.object({
-  type: z.literal("map_select_area_resolves_properties"),
-  area: MapSelectionAreaSchema,
-  expected_min_properties: z.number().int().positive().default(1),
-});
-
-export const UiCheckSchema = z.discriminatedUnion("type", [
-  CampaignCreateCheckSchema,
-  CampaignUpdateCheckSchema,
-  CampaignDeleteCheckSchema,
-  CommandPaletteCommandPresentCheckSchema,
-  DataSourceCreateCheckSchema,
-  DataSourceUpdateCheckSchema,
-  DataSourceDeleteCheckSchema,
-  MapSelectionCheckSchema,
-]);
 
 export const ScenarioSchema = z.object({
   id: z.string().min(1),
@@ -90,9 +56,19 @@ export const ScenarioSchema = z.object({
   artifact_selection_differ_group: z.string().min(1).optional(),
   planner_expectations: PlannerExpectationsSchema,
   deployment: DeploymentSchema,
-  ui_checks: z.array(UiCheckSchema).min(1),
+  assertions: McpAssertionsSchema.default(() => ({
+    expected_operations: [],
+    expected_entities_created: [],
+    expected_entities_updated: [],
+    expected_response_fields: [],
+    expected_notifications: [],
+    require_sibling_metadata: false,
+    require_url_check: false,
+  })),
 });
 
-export type UiCheck = z.infer<typeof UiCheckSchema>;
 export type ScenarioDefinition = z.infer<typeof ScenarioSchema>;
-export type MapSelectionArea = z.infer<typeof MapSelectionAreaSchema>;
+export type McpAssertions = z.infer<typeof McpAssertionsSchema>;
+export type ExpectedEntity = z.infer<typeof ExpectedEntitySchema>;
+export type ExpectedResponseField = z.infer<typeof ExpectedResponseFieldSchema>;
+export type ExpectedNotification = z.infer<typeof ExpectedNotificationSchema>;

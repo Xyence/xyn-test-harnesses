@@ -13,6 +13,7 @@ forbidden_artifacts:
   - xyn-api
 accepted_dependency_reasons:
   - ui_depends_on_shared_command_schema
+artifact_selection_differ_group: phase1-palette-paraphrase-family
 planner_expectations:
   should_use_mcp: true
   should_update_command_palette: true

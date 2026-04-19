@@ -1,0 +1,36 @@
+id: mcp_create_campaign
+title: "MCP Native: Create Campaign"
+request: >
+  Create a new Deal Finder campaign named "Q2 Retail Expansion Campaign" and return campaign metadata.
+allow_core_bypass: false
+expected_artifacts:
+  - xyn-ui
+expected_primary_artifact: xyn-ui
+optional_artifacts:
+  - xyn-api
+forbidden_artifacts: []
+accepted_dependency_reasons:
+  - ui_command_requires_api_route_registration
+planner_expectations:
+  should_use_mcp: true
+  should_update_command_palette: false
+  may_require_core_xyn_changes: false
+  success_criteria:
+    - Planner describes campaign creation steps.
+    - Planner includes validation approach.
+  required_phrases:
+    - campaign
+    - create
+  forbidden_phrases: []
+deployment:
+  mode: preview
+  requires_xyn_api: true
+  require_branch_isolation: false
+assertions:
+  expected_operations:
+    - create_campaign
+  expected_entities_created:
+    - type: campaign
+      name_contains: retail
+  expected_response_fields:
+    - path: plannerOutput.response.current_status

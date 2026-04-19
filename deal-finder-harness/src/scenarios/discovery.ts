@@ -18,14 +18,21 @@ export async function discoverScenarios(): Promise<ScenarioDefinition[]> {
   for (const fileName of files) {
     const filePath = path.join(SCENARIO_DIR, fileName);
     const raw = await readFile(filePath, "utf8");
-    const parsedYaml = parse(raw);
+    let parsedYaml: unknown;
+    try {
+      parsedYaml = parse(raw);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`Scenario schema validation failure '${fileName}': invalid YAML: ${message}`);
+    }
 
+    // ScenarioSchema validates MCP-native assertions; unknown legacy fields are ignored.
     const parsedScenario = ScenarioSchema.safeParse(parsedYaml);
     if (!parsedScenario.success) {
       const details = parsedScenario.error.issues
         .map((issue) => `${issue.path.join(".") || "scenario"}: ${issue.message}`)
         .join("; ");
-      throw new Error(`Invalid scenario '${fileName}': ${details}`);
+      throw new Error(`Scenario schema validation failure '${fileName}': ${details}`);
     }
 
     scenarios.push(parsedScenario.data);

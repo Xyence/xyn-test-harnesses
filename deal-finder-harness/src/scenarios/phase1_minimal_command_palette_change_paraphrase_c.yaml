@@ -1,8 +1,8 @@
-id: phase1_minimal_command_palette_change_paraphrase_b
-title: "Phase1 Minimal Paraphrase B"
+id: phase1_minimal_command_palette_change_paraphrase_c
+title: "Phase1 Minimal Paraphrase C"
 request: >
-  Adjust the command palette copy for Deal Finder so users can find it with natural language,
-  while keeping scope to frontend palette behavior.
+  Refresh Deal Finder command palette phrasing so users can discover the action faster,
+  keeping implementation constrained to existing UI command copy.
 allow_core_bypass: false
 expected_artifacts:
   - xyn-ui
@@ -19,8 +19,8 @@ planner_expectations:
   should_update_command_palette: true
   may_require_core_xyn_changes: false
   success_criteria:
-    - Planner keeps work in xyn-ui.
-    - Planner validates command discoverability in UI.
+    - Planner keeps work in xyn-ui for wording-only scope.
+    - Planner includes concrete validation steps.
   required_phrases:
     - command palette
     - xyn-ui

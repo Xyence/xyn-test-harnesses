@@ -1,7 +1,7 @@
 {
   "name": "deal-finder-harness",
   "version": "1.0.0",
-  "description": "Scenario harness for Deal Finder MCP + Xyn UI command palette validation",
+  "description": "Scenario harness for Deal Finder MCP-native validation",
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx src/index.ts",
@@ -13,14 +13,12 @@
   "keywords": [
     "xyn",
     "harness",
-    "playwright",
     "mcp"
   ],
   "author": "",
   "license": "ISC",
   "dependencies": {
     "dotenv": "^17.4.2",
-    "playwright": "^1.59.1",
     "yaml": "^2.8.3",
     "zod": "^4.3.6"
   },

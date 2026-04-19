@@ -1,11 +1,8 @@
 import { loadEnvConfig } from "./config/env";
 import { buildCachedTokenAuthProvider } from "./auth/authProvider";
 import { buildHttpMcpClient } from "./clients/mcpClient";
-import { buildPlaywrightCommandPaletteVerifier } from "./ui/playwright/commandPalette";
 import { discoverScenarios } from "./scenarios/discovery";
 import { ScenarioRunner } from "./runners/scenarioRunner";
-import { CoreBypassRunner } from "./runners/coreBypassRunner";
-import { VerificationRunner } from "./runners/verificationRunner";
 import { writeLatestReport } from "./reports/reportWriter";
 
 async function main(): Promise<void> {
@@ -52,18 +49,6 @@ async function main(): Promise<void> {
     },
   });
 
-  const uiVerifier = buildPlaywrightCommandPaletteVerifier({
-    storageStatePath: env.PLAYWRIGHT_STORAGE_STATE,
-    artifactsDir: env.ARTIFACTS_DIR,
-    headless: env.PLAYWRIGHT_HEADLESS,
-  });
-  const coreBypassRunner = new CoreBypassRunner();
-  const verificationRunner = new VerificationRunner({
-    artifactsDir: env.ARTIFACTS_DIR,
-    storageStatePath: env.PLAYWRIGHT_STORAGE_STATE,
-    headless: env.PLAYWRIGHT_HEADLESS,
-  });
-
   const discovered = await discoverScenarios();
   const scenarios =
     env.HARNESS_SCENARIO_ID === "all"
@@ -77,10 +62,8 @@ async function main(): Promise<void> {
   const runner = new ScenarioRunner({
     authProvider,
     mcpClient,
-    uiVerifier,
-    coreBypassRunner,
-    verificationRunner,
     configuredTokenMode: env.MCP_AUTH_TOKEN_MODE,
+    artifactsDir: env.ARTIFACTS_DIR,
   });
 
   const report = await runner.runSequentially(scenarios);
@@ -91,7 +74,10 @@ async function main(): Promise<void> {
     totalScenarios: report.summary.totalScenarios,
     passedScenarios: report.summary.passedScenarios,
     failedScenarios: report.summary.failedScenarios,
-    scenariosUsingCoreBypass: report.summary.scenariosUsingCoreBypass,
+    blockedScenarios: report.summary.blockedScenarios,
+    artifactMismatches: report.summary.artifactMismatches,
+    plannerMismatches: report.summary.plannerMismatches,
+    entityAssertionMismatches: report.summary.entityAssertionMismatches,
     artifactSelectionDifferenceViolations: report.summary.artifactSelectionDifferenceViolations,
     cannedPlanViolations: report.summary.cannedPlanViolations,
     latestReportPath: `${env.ARTIFACTS_DIR}/reports/latest.json`,
@@ -106,7 +92,11 @@ async function main(): Promise<void> {
 }
 
 main().catch((error: unknown) => {
-  console.error("Harness failed", error);
+  const message = error instanceof Error ? error.message : String(error);
+  const category = message.includes("Scenario schema validation failure")
+    ? "schema_validation_failure"
+    : "harness_failure";
+  console.error("Harness failed", { category, message });
   process.exitCode = 1;
 });
 
@@ -166,68 +156,63 @@ function findFirstFailedGate(
     return null;
   }
 
-  if (firstFailedScenario.mcpDetails.includes("MCP planning failed")) {
+  if (firstFailedScenario.failureCategory === "mcp_request_failure") {
     return {
       scenarioId: firstFailedScenario.scenarioId,
-      gate: "mcp_planning",
+      gate: "mcp_request_failure",
       details: [firstFailedScenario.mcpDetails],
     };
   }
 
-  if (!firstFailedScenario.artifactSelectionCheck.passed) {
+  if (firstFailedScenario.failureCategory === "artifact_mismatch") {
     return {
       scenarioId: firstFailedScenario.scenarioId,
-      gate: "artifact_selection",
+      gate: "artifact_mismatch",
       details: firstFailedScenario.artifactSelectionCheck.details,
     };
   }
 
-  if (!firstFailedScenario.plannerCheck.passed) {
+  if (firstFailedScenario.failureCategory === "planner_mismatch") {
     return {
       scenarioId: firstFailedScenario.scenarioId,
-      gate: "planner",
+      gate: "planner_mismatch",
       details: firstFailedScenario.plannerCheck.details,
     };
   }
 
-  if (!firstFailedScenario.siblingCheck.passed) {
+  if (firstFailedScenario.failureCategory === "sibling_mismatch") {
     return {
       scenarioId: firstFailedScenario.scenarioId,
-      gate: "sibling",
+      gate: "sibling_mismatch",
       details: firstFailedScenario.siblingCheck.details,
     };
   }
 
-  if (!firstFailedScenario.urlCheck.passed) {
+  if (firstFailedScenario.failureCategory === "url_mismatch") {
     return {
       scenarioId: firstFailedScenario.scenarioId,
-      gate: "url_check",
+      gate: "url_mismatch",
       details: firstFailedScenario.urlCheck.details,
     };
   }
 
-  if (!firstFailedScenario.coreBypass.succeeded) {
+  if (firstFailedScenario.failureCategory === "blocked_scenario" && firstFailedScenario.blockedReason) {
     return {
       scenarioId: firstFailedScenario.scenarioId,
-      gate: "core_bypass",
-      details: [firstFailedScenario.coreBypass.log],
+      gate: "blocked_scenario",
+      details: [firstFailedScenario.blockedReason],
     };
   }
 
-  if (!firstFailedScenario.verification.passed) {
+  if (firstFailedScenario.failureCategory === "entity_assertion_failure") {
+    const assertionFailures = Object.entries(firstFailedScenario.assertionChecks).filter(
+      ([, check]) => !check.passed,
+    );
+    const [name, check] = assertionFailures[0] ?? ["unknown", { details: [firstFailedScenario.mcpDetails] }];
     return {
       scenarioId: firstFailedScenario.scenarioId,
-      gate: "playwright_verification",
-      details: firstFailedScenario.verification.details,
-    };
-  }
-
-  const firstFailedUiCheck = firstFailedScenario.uiChecks.find((check) => check.status === "failed");
-  if (firstFailedUiCheck) {
-    return {
-      scenarioId: firstFailedScenario.scenarioId,
-      gate: `ui_check:${firstFailedUiCheck.checkType}`,
-      details: [firstFailedUiCheck.message],
+      gate: `entity_assertion_failure:${name}`,
+      details: check.details,
     };
   }
 

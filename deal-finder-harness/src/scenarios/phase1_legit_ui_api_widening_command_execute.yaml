@@ -1,0 +1,38 @@
+id: phase1_legit_ui_api_widening_command_execute
+title: "Phase1 Legitimate Widening: Palette Command Execute Requires API"
+request: >
+  Add a Deal Finder command palette action that executes immediately from the palette
+  to create a datasource and return success/failure feedback, requiring UI command wiring
+  and xyn-api endpoint integration.
+allow_core_bypass: false
+expected_artifacts:
+  - xyn-ui
+  - xyn-api
+expected_primary_artifact: xyn-ui
+optional_artifacts:
+  - deal-finder-harness
+forbidden_artifacts: []
+accepted_dependency_reasons:
+  - ui_command_requires_api_route_registration
+  - api_depends_on_shared_contract
+artifact_selection_differ_group: phase1-api-widening-contrast-2
+planner_expectations:
+  should_use_mcp: true
+  should_update_command_palette: true
+  may_require_core_xyn_changes: false
+  success_criteria:
+    - Planner explains why xyn-api widening is required for command execution.
+    - Planner includes both implementation and validation sequencing.
+  required_phrases:
+    - xyn-ui
+    - xyn-api
+    - dependency
+  forbidden_phrases:
+    - ui-only
+deployment:
+  mode: preview
+  requires_xyn_api: true
+  require_branch_isolation: true
+ui_checks:
+  - type: command_palette_command_present
+    command_text: "Create data source"

@@ -1,8 +1,8 @@
-id: phase1_minimal_command_palette_change_paraphrase_b
-title: "Phase1 Minimal Paraphrase B"
+id: phase1_negative_ui_copy_only_no_api
+title: "Phase1 Negative Control: UI Copy Only, No API Widening"
 request: >
-  Adjust the command palette copy for Deal Finder so users can find it with natural language,
-  while keeping scope to frontend palette behavior.
+  Update Deal Finder helper text shown in the command palette results panel only,
+  explicitly avoiding any command execution or datasource persistence changes.
 allow_core_bypass: false
 expected_artifacts:
   - xyn-ui
@@ -11,21 +11,21 @@ optional_artifacts:
   - deal-finder-harness
 forbidden_artifacts:
   - xyn-api
-accepted_dependency_reasons:
-  - ui_depends_on_shared_command_schema
-artifact_selection_differ_group: phase1-palette-paraphrase-family
+accepted_dependency_reasons: []
+artifact_selection_differ_group: phase1-api-widening-contrast-2
 planner_expectations:
   should_use_mcp: true
   should_update_command_palette: true
   may_require_core_xyn_changes: false
   success_criteria:
-    - Planner keeps work in xyn-ui.
-    - Planner validates command discoverability in UI.
+    - Planner keeps scope in xyn-ui.
+    - Planner explicitly avoids backend/API updates.
   required_phrases:
-    - command palette
     - xyn-ui
+    - validation
   forbidden_phrases:
-    - api migration
+    - xyn-api
+    - api route
 deployment:
   mode: preview
   requires_xyn_api: false

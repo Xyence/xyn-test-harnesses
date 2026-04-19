@@ -1,6 +1,7 @@
+import fs from "node:fs/promises";
+import path from "node:path";
 import type { AuthProvider } from "../auth/authProvider";
 import type { McpClient } from "../clients/mcpClient";
-import { runUiCheck } from "../checks/stepChecks";
 import { runArtifactSelectionCheck, type ArtifactSelectionCheckResult } from "../checks/artifactSelectionCheck";
 import {
   buildIntentKeywords,
@@ -10,11 +11,12 @@ import {
 } from "../checks/plannerCheck";
 import { runSiblingCheck, type SiblingCheckResult } from "../checks/siblingCheck";
 import { runUrlCheck, type UrlCheckResult } from "../checks/urlCheck";
-import type { StructuredCheckResult } from "../checks/campaignCrudCheck";
-import type { CommandPaletteVerifier } from "../ui/playwright/commandPalette";
+import { runCampaignMcpCheck } from "../checks/campaignMcpCheck";
+import { runDataSourceMcpCheck } from "../checks/dataSourceMcpCheck";
+import { runNotificationMcpCheck } from "../checks/notificationMcpCheck";
+import { runResponseFieldCheck } from "../checks/responseFieldCheck";
+import type { McpAssertionCheckResult } from "../checks/mcpAssertionTypes";
 import type { ScenarioDefinition } from "../scenarios/types";
-import { CoreBypassRunner, type CoreBypassResult } from "./coreBypassRunner";
-import { VerificationRunner, type VerificationResult } from "./verificationRunner";
 
 export interface ScenarioRunResult {
   readonly scenarioId: string;
@@ -23,13 +25,27 @@ export interface ScenarioRunResult {
   readonly startedAtIso: string;
   readonly endedAtIso: string;
   readonly mcpDetails: string;
+  readonly blockedReason: string | null;
+  readonly failureCategory:
+    | "mcp_request_failure"
+    | "schema_validation_failure"
+    | "planner_mismatch"
+    | "artifact_mismatch"
+    | "blocked_scenario"
+    | "entity_assertion_failure"
+    | "sibling_mismatch"
+    | "url_mismatch"
+    | null;
   readonly artifactSelectionCheck: ArtifactSelectionCheckResult;
   readonly plannerCheck: PlannerCheckResult;
   readonly siblingCheck: SiblingCheckResult;
   readonly urlCheck: UrlCheckResult;
-  readonly verification: VerificationResult;
-  readonly uiChecks: readonly StructuredCheckResult[];
-  readonly coreBypass: CoreBypassResult;
+  readonly assertionChecks: {
+    readonly campaign: McpAssertionCheckResult;
+    readonly dataSource: McpAssertionCheckResult;
+    readonly notification: McpAssertionCheckResult;
+    readonly responseField: McpAssertionCheckResult;
+  };
 }
 
 export interface ArtifactSelectionDifferenceViolation {
@@ -50,7 +66,10 @@ export interface HarnessRunReport {
     readonly totalScenarios: number;
     readonly passedScenarios: number;
     readonly failedScenarios: number;
-    readonly scenariosUsingCoreBypass: number;
+    readonly blockedScenarios: number;
+    readonly artifactMismatches: number;
+    readonly plannerMismatches: number;
+    readonly entityAssertionMismatches: number;
     readonly artifactSelectionDifferenceViolations: number;
     readonly cannedPlanViolations: number;
   };
@@ -62,10 +81,8 @@ export interface HarnessRunReport {
 interface ScenarioRunnerDependencies {
   readonly authProvider: AuthProvider;
   readonly mcpClient: McpClient;
-  readonly uiVerifier: CommandPaletteVerifier;
-  readonly coreBypassRunner: CoreBypassRunner;
-  readonly verificationRunner: VerificationRunner;
   readonly configuredTokenMode: "access_token" | "id_token";
+  readonly artifactsDir: string;
 }
 
 const MISSING_DEVELOPMENT_RESULT_ARTIFACT_CHECK: ArtifactSelectionCheckResult = {
@@ -109,21 +126,21 @@ const MISSING_DEVELOPMENT_RESULT_PLANNER_CHECK: PlannerCheckResult = {
   },
 };
 
-const MISSING_DEVELOPMENT_RESULT_SIBLING_CHECK: SiblingCheckResult = {
-  passed: false,
-  details: ["MCP development result is missing; cannot validate sibling information"],
+const SKIPPED_SIBLING_CHECK: SiblingCheckResult = {
+  passed: true,
+  details: ["Sibling check not requested by scenario"],
   observed: {
     siblingId: null,
     siblingUrl: null,
     branchName: null,
     requireBranchIsolation: false,
-    missingFields: ["siblingId", "siblingUrl"],
+    missingFields: [],
   },
 };
 
 const SKIPPED_URL_CHECK: UrlCheckResult = {
-  passed: false,
-  details: ["URL check skipped because siblingUrl is unavailable"],
+  passed: true,
+  details: ["URL check not requested by scenario"],
   observed: {
     url: "",
     startedAtIso: new Date(0).toISOString(),
@@ -136,21 +153,10 @@ const SKIPPED_URL_CHECK: UrlCheckResult = {
   },
 };
 
-const SKIPPED_VERIFICATION: VerificationResult = {
-  passed: false,
-  details: ["Playwright verification skipped"],
-  observed: {
-    scenarioId: "",
-    siblingUrl: null,
-    commands: [],
-    startedAtIso: new Date(0).toISOString(),
-    endedAtIso: new Date(0).toISOString(),
-    durationMs: 0,
-    screenshotPaths: [],
-    appShellAssertion: {},
-    loginCheck: {},
-    commandResults: [],
-  },
+const EMPTY_ASSERTION_CHECK: McpAssertionCheckResult = {
+  passed: true,
+  details: ["No MCP assertions expected for this check"],
+  observed: {},
 };
 
 export class ScenarioRunner {
@@ -158,7 +164,6 @@ export class ScenarioRunner {
 
   async runSequentially(scenarios: readonly ScenarioDefinition[]): Promise<HarnessRunReport> {
     const authSession = await this.deps.authProvider.getSession();
-
     const scenarioResults: ScenarioRunResult[] = [];
 
     for (const scenario of scenarios) {
@@ -182,18 +187,47 @@ export class ScenarioRunner {
           passed: false,
           startedAtIso,
           endedAtIso: new Date().toISOString(),
-          mcpDetails: mcpResult.details,
+          mcpDetails: `mcp_request_failure: ${mcpResult.details}`,
+          blockedReason: null,
+          failureCategory: "mcp_request_failure",
           artifactSelectionCheck: MISSING_DEVELOPMENT_RESULT_ARTIFACT_CHECK,
           plannerCheck: MISSING_DEVELOPMENT_RESULT_PLANNER_CHECK,
-          siblingCheck: MISSING_DEVELOPMENT_RESULT_SIBLING_CHECK,
+          siblingCheck: SKIPPED_SIBLING_CHECK,
           urlCheck: SKIPPED_URL_CHECK,
-          verification: SKIPPED_VERIFICATION,
-          uiChecks: [],
-          coreBypass: {
-            used: false,
-            authorized: scenario.allow_core_bypass,
-            succeeded: false,
-            log: "Skipped due to MCP planning failure",
+          assertionChecks: {
+            campaign: EMPTY_ASSERTION_CHECK,
+            dataSource: EMPTY_ASSERTION_CHECK,
+            notification: EMPTY_ASSERTION_CHECK,
+            responseField: EMPTY_ASSERTION_CHECK,
+          },
+        });
+        continue;
+      }
+
+      await writeMcpRawResponseSnapshot(this.deps.artifactsDir, scenario.id, mcpResult.developmentResult.rawResponses);
+
+      if (mcpResult.requiresCoreXynChanges) {
+        const blockedReason =
+          "blocked: scenario requires out-of-band core Xyn setup. Core bypass execution is disabled in MCP-native mode.";
+
+        scenarioResults.push({
+          scenarioId: scenario.id,
+          title: scenario.title,
+          passed: false,
+          startedAtIso,
+          endedAtIso: new Date().toISOString(),
+          mcpDetails: `blocked_scenario: ${mcpResult.details}; ${blockedReason}`,
+          blockedReason,
+          failureCategory: "blocked_scenario",
+          artifactSelectionCheck: runArtifactSelectionCheck(scenario, mcpResult.developmentResult),
+          plannerCheck: runPlannerCheck(scenario, mcpResult.developmentResult),
+          siblingCheck: SKIPPED_SIBLING_CHECK,
+          urlCheck: SKIPPED_URL_CHECK,
+          assertionChecks: {
+            campaign: EMPTY_ASSERTION_CHECK,
+            dataSource: EMPTY_ASSERTION_CHECK,
+            notification: EMPTY_ASSERTION_CHECK,
+            responseField: EMPTY_ASSERTION_CHECK,
           },
         });
         continue;
@@ -209,77 +243,41 @@ export class ScenarioRunner {
 
       const artifactSelectionCheck = runArtifactSelectionCheck(scenario, mcpResult.developmentResult);
       const plannerCheck = runPlannerCheck(scenario, mcpResult.developmentResult);
-      const siblingCheck = runSiblingCheck(scenario, mcpResult.developmentResult);
+      const shouldRunSiblingCheck =
+        scenario.assertions.require_sibling_metadata || scenario.deployment.require_branch_isolation;
+      const shouldRunUrlCheck = scenario.assertions.require_url_check;
 
-      const urlCheck = await runUrlCheck(mcpResult.developmentResult.siblingUrl);
+      const siblingCheck = shouldRunSiblingCheck
+        ? runSiblingCheck(scenario, mcpResult.developmentResult)
+        : SKIPPED_SIBLING_CHECK;
+      const urlCheck = shouldRunUrlCheck
+        ? await runUrlCheck(mcpResult.developmentResult.siblingUrl)
+        : SKIPPED_URL_CHECK;
 
-      let bypassResult: CoreBypassResult = {
-        used: false,
-        authorized: scenario.allow_core_bypass,
-        succeeded: true,
-        log: "Core bypass not required",
-      };
+      const campaignCheck = runCampaignMcpCheck(scenario, mcpResult.developmentResult);
+      const dataSourceCheck = runDataSourceMcpCheck(scenario, mcpResult.developmentResult);
+      const notificationCheck = runNotificationMcpCheck(scenario, mcpResult.developmentResult);
+      const responseFieldCheck = runResponseFieldCheck(scenario, mcpResult.developmentResult);
 
-      if (mcpResult.requiresCoreXynChanges) {
-        bypassResult = await this.deps.coreBypassRunner.run(scenario.allow_core_bypass);
+      const assertionPassed =
+        campaignCheck.passed && dataSourceCheck.passed && notificationCheck.passed && responseFieldCheck.passed;
 
-        if (!scenario.allow_core_bypass || !bypassResult.succeeded) {
-          scenarioResults.push({
-            scenarioId: scenario.id,
-            title: scenario.title,
-            passed: false,
-            startedAtIso,
-            endedAtIso: new Date().toISOString(),
-            mcpDetails: `${mcpResult.details}; core bypass not available`,
-            artifactSelectionCheck,
-            plannerCheck,
-            siblingCheck,
-            urlCheck,
-            verification: SKIPPED_VERIFICATION,
-            uiChecks: [],
-            coreBypass: bypassResult,
-          });
-          continue;
-        }
-      }
-
-      this.deps.uiVerifier.setActiveSiblingUrl(mcpResult.developmentResult.siblingUrl);
-
-      const verification = await this.deps.verificationRunner.run(
-        scenario,
-        mcpResult.developmentResult.siblingUrl,
-      );
-
-      const uiResults: StructuredCheckResult[] = [];
-      let scenarioPassed =
+      const scenarioPassed =
         artifactSelectionCheck.passed &&
         plannerCheck.passed &&
         siblingCheck.passed &&
         urlCheck.passed &&
-        verification.passed;
+        assertionPassed;
 
-      for (const check of scenario.ui_checks) {
-        let uiResult: StructuredCheckResult;
-        try {
-          uiResult = await runUiCheck(check, this.deps.uiVerifier);
-        } catch (error: unknown) {
-          uiResult = {
-            checkType: check.type,
-            status: "failed",
-            message:
-              error instanceof Error
-                ? `UI check execution failed: ${error.message}`
-                : "UI check execution failed with unknown error",
-            details: {
-              error: error instanceof Error ? error.stack ?? error.message : String(error),
-            },
-          };
-        }
-        uiResults.push(uiResult);
-        if (uiResult.status === "failed") {
-          scenarioPassed = false;
-        }
-      }
+      const failureCategory = scenarioPassed
+        ? null
+        : classifyFailureCategory({
+            artifactSelectionPassed: artifactSelectionCheck.passed,
+            plannerPassed: plannerCheck.passed,
+            siblingPassed: siblingCheck.passed,
+            urlPassed: urlCheck.passed,
+            assertionPassed,
+          });
 
       scenarioResults.push({
         scenarioId: scenario.id,
@@ -287,20 +285,24 @@ export class ScenarioRunner {
         passed: scenarioPassed,
         startedAtIso,
         endedAtIso: new Date().toISOString(),
-        mcpDetails: mcpResult.details,
+        mcpDetails: scenarioPassed ? mcpResult.details : `${failureCategory}: ${mcpResult.details}`,
+        blockedReason: null,
+        failureCategory,
         artifactSelectionCheck,
         plannerCheck,
         siblingCheck,
         urlCheck,
-        verification,
-        uiChecks: uiResults,
-        coreBypass: bypassResult,
+        assertionChecks: {
+          campaign: campaignCheck,
+          dataSource: dataSourceCheck,
+          notification: notificationCheck,
+          responseField: responseFieldCheck,
+        },
       });
     }
 
     const differenceViolations = computeArtifactSelectionDifferenceViolations(scenarios, scenarioResults);
     const cannedPlanViolations = computeCannedPlanViolations(scenarios, scenarioResults);
-
     const cannedViolationIds = new Set(
       cannedPlanViolations.flatMap((violation) => [violation.scenarioIdA, violation.scenarioIdB]),
     );
@@ -309,15 +311,25 @@ export class ScenarioRunner {
       if (!cannedViolationIds.has(result.scenarioId)) {
         return result;
       }
-
       return {
         ...result,
         passed: false,
-        mcpDetails: `${result.mcpDetails}; canned-plan detector violation`,
+        failureCategory: result.failureCategory ?? "planner_mismatch",
+        mcpDetails: `${result.mcpDetails}; planner_mismatch: canned-plan detector violation`,
       };
     });
 
     const passedScenarios = resultsWithCannedEnforcement.filter((result) => result.passed).length;
+    const blockedScenarios = resultsWithCannedEnforcement.filter((result) => result.blockedReason !== null).length;
+    const artifactMismatches = resultsWithCannedEnforcement.filter(
+      (result) => result.failureCategory === "artifact_mismatch",
+    ).length;
+    const plannerMismatches = resultsWithCannedEnforcement.filter(
+      (result) => result.failureCategory === "planner_mismatch",
+    ).length;
+    const entityAssertionMismatches = resultsWithCannedEnforcement.filter(
+      (result) => result.failureCategory === "entity_assertion_failure",
+    ).length;
 
     return {
       generatedAtIso: new Date().toISOString(),
@@ -325,7 +337,10 @@ export class ScenarioRunner {
         totalScenarios: resultsWithCannedEnforcement.length,
         passedScenarios,
         failedScenarios: resultsWithCannedEnforcement.length - passedScenarios,
-        scenariosUsingCoreBypass: resultsWithCannedEnforcement.filter((result) => result.coreBypass.used).length,
+        blockedScenarios,
+        artifactMismatches,
+        plannerMismatches,
+        entityAssertionMismatches,
         artifactSelectionDifferenceViolations: differenceViolations.length,
         cannedPlanViolations: cannedPlanViolations.length,
       },
@@ -334,6 +349,18 @@ export class ScenarioRunner {
       scenarios: resultsWithCannedEnforcement,
     };
   }
+}
+
+async function writeMcpRawResponseSnapshot(
+  artifactsDir: string,
+  scenarioId: string,
+  rawResponses: unknown,
+): Promise<void> {
+  const safeScenarioId = scenarioId.replace(/[^a-zA-Z0-9_-]/g, "_");
+  const outputDir = path.resolve(process.cwd(), artifactsDir, "reports", "mcp-raw");
+  await fs.mkdir(outputDir, { recursive: true });
+  const outputPath = path.resolve(outputDir, `${safeScenarioId}.json`);
+  await fs.writeFile(outputPath, `${JSON.stringify(rawResponses, null, 2)}\n`, "utf8");
 }
 
 function computeArtifactSelectionDifferenceViolations(
@@ -356,7 +383,6 @@ function computeArtifactSelectionDifferenceViolations(
   }
 
   const violations: ArtifactSelectionDifferenceViolation[] = [];
-
   for (const [group, entries] of grouped.entries()) {
     const bySetKey = new Map<string, string[]>();
 
@@ -451,32 +477,18 @@ function areRelatedScenarios(a: ScenarioDefinition, b: ScenarioDefinition): bool
 function plannerSimilarity(textA: string, textB: string): number {
   const tokensA = tokenizeForSimilarity(textA);
   const tokensB = tokenizeForSimilarity(textB);
-
   if (tokensA.size === 0 || tokensB.size === 0) {
     return 0;
   }
 
   const intersection = [...tokensA].filter((token) => tokensB.has(token)).length;
   const union = new Set([...tokensA, ...tokensB]).size;
-
   return union === 0 ? 0 : intersection / union;
 }
 
 function tokenizeForSimilarity(text: string): Set<string> {
   const normalized = normalizeText(text);
-  const stopwords = new Set([
-    "the",
-    "and",
-    "for",
-    "with",
-    "that",
-    "this",
-    "from",
-    "into",
-    "will",
-    "should",
-    "step",
-  ]);
+  const stopwords = new Set(["the", "and", "for", "with", "that", "this", "from", "into", "will", "should", "step"]);
 
   return new Set(
     normalized
@@ -488,4 +500,35 @@ function tokenizeForSimilarity(text: string): Set<string> {
 
 function normalizeArtifactSet(artifacts: readonly string[]): string[] {
   return [...new Set(artifacts)].sort((a, b) => a.localeCompare(b));
+}
+
+function classifyFailureCategory(args: {
+  artifactSelectionPassed: boolean;
+  plannerPassed: boolean;
+  siblingPassed: boolean;
+  urlPassed: boolean;
+  assertionPassed: boolean;
+}):
+  | "planner_mismatch"
+  | "artifact_mismatch"
+  | "entity_assertion_failure"
+  | "sibling_mismatch"
+  | "url_mismatch" {
+  if (!args.artifactSelectionPassed) {
+    return "artifact_mismatch";
+  }
+
+  if (!args.plannerPassed) {
+    return "planner_mismatch";
+  }
+
+  if (!args.siblingPassed) {
+    return "sibling_mismatch";
+  }
+
+  if (!args.urlPassed) {
+    return "url_mismatch";
+  }
+
+  return "entity_assertion_failure";
 }

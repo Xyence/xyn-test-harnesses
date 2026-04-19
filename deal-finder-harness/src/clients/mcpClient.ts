@@ -61,7 +61,7 @@ export interface DevelopmentRequestResult {
   readonly plannerPlan: unknown;
   readonly siblingId: string;
   readonly siblingUrl: string;
-  readonly branchName: string;
+  readonly branchName: string | null;
   readonly rawResponses: {
     readonly submitRequest: unknown;
     readonly artifactSelection: unknown;
@@ -321,12 +321,11 @@ async function submitDevelopmentRequestViaRest(
     ]);
 
   const plannerPlan =
-    extractFirstKnown(submitResponse.data, [
-      ["plannerPlan"],
-      ["planner", "plan"],
-      ["planner_output"],
-      ["plan"],
-    ]) ?? extractFirstKnown(plannerOutputResponse, [["plannerPlan"], ["planner", "plan"], ["plan"]]);
+    resolvePlannerPlan({
+      submitResponse: submitResponse.data,
+      plannerOutputResponse,
+      fallbackSources: [submitResponse.data, plannerOutputResponse],
+    });
 
   const siblingId =
     extractFirstString(submitResponse.data, [["siblingId"], ["sibling", "id"], ["sibling_id"]]) ??
@@ -339,6 +338,12 @@ async function submitDevelopmentRequestViaRest(
   const branchName =
     extractFirstString(submitResponse.data, [["branchName"], ["branch", "name"], ["branch_name"]]) ??
     extractFirstString(branchInfoResponse, [["branchName"], ["branch", "name"], ["branch_name"]]);
+
+  if (scenario.deployment.require_branch_isolation && !branchName) {
+    throw new Error(
+      `missing-backend-field: branchName is required for branch-isolated scenario '${scenario.id}' but was not present in MCP REST response payloads; rawResponses=${safeStringify(rawResponses)}`,
+    );
+  }
 
   const dependentArtifacts =
     extractFirstStringArray(submitResponse.data, [
@@ -371,9 +376,6 @@ async function submitDevelopmentRequestViaRest(
   if (!siblingUrl) {
     missing.push("siblingUrl");
   }
-  if (!branchName) {
-    missing.push("branchName");
-  }
   if (!dependentArtifacts) {
     missing.push("dependentArtifacts");
   }
@@ -390,7 +392,7 @@ async function submitDevelopmentRequestViaRest(
   const requiredPlannerPlan = plannerPlan as unknown;
   const requiredSiblingId = siblingId as string;
   const requiredSiblingUrl = siblingUrl as string;
-  const requiredBranchName = branchName as string;
+  const requiredBranchName = branchName ?? null;
 
   return {
     requestText: scenario.request,
@@ -536,12 +538,11 @@ async function submitDevelopmentRequestViaMcpProtocol(
   const artifactDetails = extractArtifactDetails(createSession) ?? [];
 
   const plannerPlan =
-    extractFirstKnown(sessionPlan, [
-      ["response", "raw", "control", "session", "planning"],
-      ["response", "planner_prompt"],
-      ["response"],
-    ]) ??
-    extractFirstKnown(createSession, [["response", "raw", "session", "planning"]]);
+    resolvePlannerPlan({
+      submitResponse: createSession,
+      plannerOutputResponse: sessionPlan,
+      fallbackSources: [sessionPlan, createSession],
+    });
 
   const siblingId = sessionId;
   const siblingUrl =
@@ -556,7 +557,21 @@ async function submitDevelopmentRequestViaMcpProtocol(
     extractFirstString(previewStatus, [
       ["response", "raw", "control", "root_target_identity", "branch"],
       ["response", "raw", "control", "root_target_identity", "branch_name"],
-    ]) ?? "";
+      ["response", "raw", "control", "session", "metadata", "branch_name"],
+      ["response", "raw", "control", "session", "metadata", "branch"],
+      ["response", "raw", "control", "session", "branch_name"],
+      ["response", "raw", "control", "session", "branch"],
+      ["response", "raw", "branch_name"],
+      ["response", "raw", "branch"],
+      ["response", "branch_name"],
+      ["response", "branch"],
+    ]) ?? null;
+
+  if (scenario.deployment.require_branch_isolation && !branchName) {
+    throw new Error(
+      `missing-backend-field: branchName is required for branch-isolated scenario '${scenario.id}' but was not present in MCP sibling/control payloads; rawResponses=${safeStringify(rawResponses)}`,
+    );
+  }
 
   const missing: string[] = [];
   if (!selectedArtifacts || selectedArtifacts.length === 0) {
@@ -777,6 +792,131 @@ function extractArtifactTitles(value: unknown): string[] | undefined {
   }
 
   return undefined;
+}
+
+function resolvePlannerPlan(args: {
+  submitResponse: unknown;
+  plannerOutputResponse: unknown;
+  fallbackSources: unknown[];
+}): unknown {
+  const explicitPlan =
+    extractFirstKnown(args.submitResponse, [
+      ["plannerPlan"],
+      ["planner", "plan"],
+      ["planner_output", "plan"],
+      ["plan", "text"],
+      ["response", "raw", "control", "session", "planning", "latest_draft_plan"],
+      ["response", "raw", "session", "planning", "latest_draft_plan"],
+    ]) ??
+    extractFirstKnown(args.plannerOutputResponse, [
+      ["plannerPlan"],
+      ["planner", "plan"],
+      ["plan", "text"],
+      ["response", "raw", "control", "session", "planning", "latest_draft_plan"],
+      ["response", "raw", "session", "planning", "latest_draft_plan"],
+    ]);
+
+  if (isRealPlannerPayload(explicitPlan)) {
+    return explicitPlan;
+  }
+
+  const plannerTurnText = extractPlannerTurnText(args.fallbackSources);
+  if (plannerTurnText) {
+    return {
+      text: plannerTurnText,
+      source: "planner_turns",
+    };
+  }
+
+  return {
+    __planner_output_missing: true,
+    reason:
+      "No concrete planner output found. Responses only contained prompt/schema metadata or empty planner fields.",
+  };
+}
+
+function isRealPlannerPayload(value: unknown): boolean {
+  if (typeof value === "string") {
+    return value.trim().length > 0;
+  }
+
+  if (Array.isArray(value)) {
+    return value.some((item) => isRealPlannerPayload(item));
+  }
+
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  const record = value as Record<string, unknown>;
+  if (record.__planner_output_missing === true) {
+    return false;
+  }
+
+  const plannerPrompt = record.planner_prompt as Record<string, unknown> | undefined;
+  if (plannerPrompt && Object.keys(record).length === 1) {
+    const pending = plannerPrompt.pending;
+    const message = plannerPrompt.message;
+    if ((pending === false || pending === undefined) && (typeof message !== "string" || message.trim().length === 0)) {
+      return false;
+    }
+  }
+
+  const textCandidates = [
+    asNonEmptyString(record.text),
+    asNonEmptyString(record.summary),
+    asNonEmptyString(record.details),
+    asNonEmptyString(record.message),
+    asNonEmptyString(record.content),
+  ].filter((item): item is string => Boolean(item));
+
+  if (textCandidates.length > 0) {
+    return true;
+  }
+
+  const json = safeStringify(value);
+  return json !== "{}" && !json.includes('"answer_payload_schema"') && !json.includes('"response_schema"');
+}
+
+function extractPlannerTurnText(sources: unknown[]): string | null {
+  for (const source of sources) {
+    const turns =
+      (getByPath(source, ["response", "raw", "control", "session", "planning", "turns"]) as unknown) ??
+      (getByPath(source, ["response", "raw", "session", "planning", "turns"]) as unknown) ??
+      (getByPath(source, ["response", "planning", "turns"]) as unknown);
+
+    if (!Array.isArray(turns)) {
+      continue;
+    }
+
+    const plannerTexts = turns
+      .filter((turn) => typeof turn === "object" && turn !== null)
+      .map((turn) => turn as Record<string, unknown>)
+      .filter((turn) => asNonEmptyString(turn.actor) === "planner")
+      .map((turn) => {
+        const payload = (turn.payload ?? {}) as Record<string, unknown>;
+        const kind = asNonEmptyString(turn.kind) ?? "";
+        const text =
+          asNonEmptyString(payload.plan) ??
+          asNonEmptyString(payload.summary) ??
+          asNonEmptyString(payload.message) ??
+          asNonEmptyString(payload.prompt);
+        if (!text) {
+          return null;
+        }
+        if (kind === "option_set" && text.trim().length === 0) {
+          return null;
+        }
+        return `[${kind || "planner"}] ${text}`;
+      })
+      .filter((item): item is string => Boolean(item));
+
+    if (plannerTexts.length > 0) {
+      return plannerTexts.join("\n");
+    }
+  }
+
+  return null;
 }
 
 export function buildHttpMcpClient(config: McpDevelopmentConfig): McpClient {

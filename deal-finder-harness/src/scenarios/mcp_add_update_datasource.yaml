@@ -1,0 +1,42 @@
+id: mcp_add_update_datasource
+title: "MCP Native: Add And Update Data Source"
+request: >
+  Add a new Deal Finder data source for county property records, then update its polling schedule to daily.
+allow_core_bypass: false
+expected_artifacts:
+  - xyn-ui
+  - xyn-api
+expected_primary_artifact: xyn-ui
+optional_artifacts: []
+forbidden_artifacts: []
+accepted_dependency_reasons:
+  - ui_command_requires_api_route_registration
+  - api_depends_on_shared_contract
+artifact_selection_differ_group: mcp-entity-management-vs-notification
+planner_expectations:
+  should_use_mcp: true
+  should_update_command_palette: false
+  may_require_core_xyn_changes: false
+  success_criteria:
+    - Planner includes data source create and update steps.
+    - Planner includes validation steps.
+  required_phrases:
+    - data source
+    - update
+  forbidden_phrases: []
+deployment:
+  mode: preview
+  requires_xyn_api: true
+  require_branch_isolation: false
+assertions:
+  expected_operations:
+    - datasource_create
+    - datasource_update
+  expected_entities_created:
+    - type: datasource
+      name_contains: county
+  expected_entities_updated:
+    - type: datasource
+      name_contains: county
+  expected_response_fields:
+    - path: plannerOutput.response.current_status

@@ -59,6 +59,7 @@ export function runPlannerCheck(
   developmentResult: DevelopmentRequestResult,
 ): PlannerCheckResult {
   const plannerText = extractPlannerText(developmentResult.plannerPlan).trim();
+  const plannerAbsenceReason = extractPlannerAbsenceReason(developmentResult.plannerPlan);
   const normalizedPlannerText = normalizeText(plannerText);
 
   const requiredPhrases =
@@ -108,6 +109,8 @@ export function runPlannerCheck(
   const details: string[] = [];
   if (plannerText.length > 0) {
     details.push("Planner output is non-empty");
+  } else if (plannerAbsenceReason) {
+    details.push(`Planner output is missing: ${plannerAbsenceReason}`);
   } else {
     details.push("Planner output is empty");
   }
@@ -196,18 +199,61 @@ export function extractPlannerText(plannerPlan: unknown): string {
   }
 
   if (typeof plannerPlan === "object" && plannerPlan !== null) {
+    const record = plannerPlan as Record<string, unknown>;
+    if (record.__planner_output_missing === true) {
+      return "";
+    }
+
+    const plannerPrompt = record.planner_prompt as Record<string, unknown> | undefined;
+    if (plannerPrompt && isEmptyPlannerPrompt(plannerPrompt) && Object.keys(record).length <= 2) {
+      return "";
+    }
+
     const candidateKeys = ["text", "plan", "summary", "details", "message", "content"] as const;
     for (const key of candidateKeys) {
-      const value = (plannerPlan as Record<string, unknown>)[key];
+      const value = record[key];
       if (typeof value === "string" && value.trim().length > 0) {
         return value;
       }
     }
 
-    return JSON.stringify(plannerPlan);
+    if (record.answer_payload_schema || record.response_schema) {
+      return "";
+    }
+
+    return JSON.stringify(record);
   }
 
   return "";
+}
+
+function extractPlannerAbsenceReason(plannerPlan: unknown): string | null {
+  if (typeof plannerPlan !== "object" || plannerPlan === null) {
+    return null;
+  }
+
+  const record = plannerPlan as Record<string, unknown>;
+  if (record.__planner_output_missing === true) {
+    const reason = record.reason;
+    return typeof reason === "string" && reason.trim().length > 0
+      ? reason
+      : "No concrete planner output was returned by MCP";
+  }
+
+  return null;
+}
+
+function isEmptyPlannerPrompt(value: Record<string, unknown>): boolean {
+  const pending = value.pending;
+  const message = value.message;
+  const options = value.options;
+  const schema = value.answer_payload_schema ?? value.response_schema;
+
+  const hasMessage = typeof message === "string" && message.trim().length > 0;
+  const hasOptions = Array.isArray(options) && options.length > 0;
+  const hasSchema = typeof schema === "object" && schema !== null;
+
+  return (pending === false || pending === undefined) && !hasMessage && !hasOptions && hasSchema;
 }
 
 export function buildIntentKeywords(requestText: string): string[] {
