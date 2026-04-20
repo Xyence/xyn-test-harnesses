@@ -2,7 +2,6 @@ id: contrastive-frontend-palette-copy
 title: "Contrastive: UI phrasing change"
 request: >
   Tweak the Deal Finder command text displayed in the command palette UI.
-allow_core_bypass: false
 expected_artifacts:
   - xyn-ui
 expected_primary_artifact: xyn-ui

@@ -21,12 +21,17 @@ async function main(): Promise<void> {
     tokenType: session.tokenType,
     expiry: session.expiresAtIso,
     audience: session.audience,
-    targetMcpUrl: env.MCP_BASE_URL,
+    targetMcpUrl: env.mcpTarget.baseUrl,
+    targetConfigSource: env.mcpTarget.targetName,
+    targetSubmitEndpoint: env.mcpTarget.submitRequestEndpoint,
+    targetHealthEndpoint: env.mcpTarget.healthEndpoint,
+    configuredAudience: env.mcpTarget.audience,
   });
 
   await probeMcpConnectivity({
-    baseUrl: env.MCP_BASE_URL,
-    submitEndpoint: env.MCP_ENDPOINT_SUBMIT_REQUEST,
+    baseUrl: env.mcpTarget.baseUrl,
+    healthEndpoint: env.mcpTarget.healthEndpoint,
+    submitEndpoint: env.mcpTarget.submitRequestEndpoint,
     bearerToken: session.accessToken,
     tokenMode: env.MCP_AUTH_TOKEN_MODE,
     tokenType: session.tokenType,
@@ -34,13 +39,13 @@ async function main(): Promise<void> {
   });
 
   const mcpClient = buildHttpMcpClient({
-    baseUrl: env.MCP_BASE_URL,
+    baseUrl: env.mcpTarget.baseUrl,
     authTokenProvider: async () => {
       const refreshedSession = await authProvider.getSession();
       return refreshedSession.accessToken;
     },
     endpoints: {
-      submitRequest: env.MCP_ENDPOINT_SUBMIT_REQUEST,
+      submitRequest: env.mcpTarget.submitRequestEndpoint,
       artifactSelection: env.MCP_ENDPOINT_ARTIFACT_SELECTION,
       plannerOutput: env.MCP_ENDPOINT_PLANNER_OUTPUT,
       siblingInfo: env.MCP_ENDPOINT_SIBLING_INFO,
@@ -102,13 +107,14 @@ main().catch((error: unknown) => {
 
 async function probeMcpConnectivity(args: {
   baseUrl: string;
+  healthEndpoint: string;
   submitEndpoint: string;
   bearerToken: string;
   tokenMode: "access_token" | "id_token";
   tokenType: "access_token" | "id_token";
   audience: string | string[] | null;
 }): Promise<void> {
-  const probeUrl = new URL("/mcp", args.baseUrl).toString();
+  const probeUrl = new URL(args.healthEndpoint, args.baseUrl).toString();
 
   const response = await fetch(probeUrl, {
     method: "GET",
@@ -135,7 +141,7 @@ async function probeMcpConnectivity(args: {
 
   if (indicatesMcpSse && args.submitEndpoint !== "/mcp") {
     throw new Error(
-      `MCP server appears to require MCP protocol at '/mcp' (SSE/JSON-RPC), but submit endpoint is configured as '${args.submitEndpoint}'. Update MCP_ENDPOINT_SUBMIT_REQUEST to '/mcp' and add MCP protocol transport support in the harness client.`,
+      `MCP server appears to require MCP protocol at '/mcp' (SSE/JSON-RPC), but submit endpoint is configured as '${args.submitEndpoint}'. Update DEAL_FINDER_MCP_ENDPOINT_SUBMIT_REQUEST (or MCP_ENDPOINT_SUBMIT_REQUEST) to '/mcp' and add MCP protocol transport support in the harness client.`,
     );
   }
 

@@ -10,23 +10,41 @@ const AUTHORIZATION_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 const TOKENINFO_ENDPOINT = "https://oauth2.googleapis.com/tokeninfo";
 
-const AuthConfigSchema = z.object({
-  MCP_BASE_URL: z.string().url(),
-  MCP_AUTH_PROBE_PATH: z.string().default("/"),
-  MCP_AUTH_TOKEN_MODE: z.enum(["access_token", "id_token"]).default("access_token"),
-  MCP_ID_TOKEN_AUDIENCE: z.string().optional(),
-  MCP_AUTH_TOKEN_FILE: z.string().default("./.auth/mcp-token.json"),
-  MCP_AUTH_CALLBACK_HOST: z.string().default("127.0.0.1"),
-  MCP_AUTH_CALLBACK_PORT: z.coerce.number().int().positive().default(8787),
-  MCP_AUTH_TIMEOUT_MS: z.coerce.number().int().positive().default(180000),
-  GOOGLE_OAUTH_CLIENT_ID: z.string().optional(),
-  GOOGLE_OAUTH_CLIENT_SECRET: z.string().optional(),
-  XYN_OIDC_CLIENT_ID: z.string().optional(),
-  XYN_OIDC_CLIENT_SECRET: z.string().optional(),
-  GOOGLE_OAUTH_SCOPES: z.string().default("openid email profile"),
-});
+const RawAuthConfigSchema = z
+  .object({
+    DEAL_FINDER_MCP_BASE_URL: z.string().url().optional(),
+    MCP_BASE_URL: z.string().url().optional(),
+    DEAL_FINDER_MCP_ENDPOINT_HEALTH: z.string().optional(),
+    MCP_ENDPOINT_HEALTH: z.string().optional(),
+    MCP_AUTH_PROBE_PATH: z.string().default("/"),
+    MCP_AUTH_TOKEN_MODE: z.enum(["access_token", "id_token"]).default("access_token"),
+    DEAL_FINDER_MCP_AUDIENCE: z.string().optional(),
+    MCP_ID_TOKEN_AUDIENCE: z.string().optional(),
+    MCP_AUTH_TOKEN_FILE: z.string().default("./.auth/mcp-token.json"),
+    MCP_AUTH_CALLBACK_HOST: z.string().default("127.0.0.1"),
+    MCP_AUTH_CALLBACK_PORT: z.coerce.number().int().positive().default(8787),
+    MCP_AUTH_TIMEOUT_MS: z.coerce.number().int().positive().default(180000),
+    GOOGLE_OAUTH_CLIENT_ID: z.string().optional(),
+    GOOGLE_OAUTH_CLIENT_SECRET: z.string().optional(),
+    XYN_OIDC_CLIENT_ID: z.string().optional(),
+    XYN_OIDC_CLIENT_SECRET: z.string().optional(),
+    GOOGLE_OAUTH_SCOPES: z.string().default("openid email profile"),
+  })
+  .superRefine((value, ctx) => {
+    if (!value.DEAL_FINDER_MCP_BASE_URL && !value.MCP_BASE_URL) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["DEAL_FINDER_MCP_BASE_URL"],
+        message: "Set DEAL_FINDER_MCP_BASE_URL or MCP_BASE_URL",
+      });
+    }
+  });
 
-type AuthConfig = z.infer<typeof AuthConfigSchema>;
+interface AuthConfig extends z.infer<typeof RawAuthConfigSchema> {
+  resolvedMcpBaseUrl: string;
+  resolvedProbePath: string;
+  resolvedIdTokenAudience: string | undefined;
+}
 
 interface TokenResponse {
   access_token?: string;
@@ -70,6 +88,13 @@ async function main(): Promise<void> {
   dotenv.config({ path: path.resolve(process.cwd(), ".env") });
 
   const config = parseConfig();
+  console.log("auth:mcp target configuration", {
+    baseUrl: config.resolvedMcpBaseUrl,
+    probePath: config.resolvedProbePath,
+    audience: config.resolvedIdTokenAudience ?? null,
+    source: config.DEAL_FINDER_MCP_BASE_URL ? "deal_finder_mcp" : "generic_mcp",
+  });
+
   const clientId = config.GOOGLE_OAUTH_CLIENT_ID ?? config.XYN_OIDC_CLIENT_ID;
   const clientSecret = config.GOOGLE_OAUTH_CLIENT_SECRET ?? config.XYN_OIDC_CLIENT_SECRET;
   if (!clientId) {
@@ -120,19 +145,19 @@ async function main(): Promise<void> {
 
   if (
     config.MCP_AUTH_TOKEN_MODE === "id_token" &&
-    config.MCP_ID_TOKEN_AUDIENCE &&
-    !audienceIncludes(diagnostics.audience, config.MCP_ID_TOKEN_AUDIENCE)
+    config.resolvedIdTokenAudience &&
+    !audienceIncludes(diagnostics.audience, config.resolvedIdTokenAudience)
   ) {
     throw new Error(
-      `Configured MCP_ID_TOKEN_AUDIENCE '${config.MCP_ID_TOKEN_AUDIENCE}' does not match token audience '${String(
+      `Configured MCP audience '${config.resolvedIdTokenAudience}' does not match token audience '${String(
         diagnostics.audience,
       )}'. In Google OAuth authorization-code flow, ID token audience is typically the OAuth client ID, not an arbitrary URL audience.`,
     );
   }
 
   const probeResult = await probeMcp({
-    baseUrl: config.MCP_BASE_URL,
-    probePath: config.MCP_AUTH_PROBE_PATH,
+    baseUrl: config.resolvedMcpBaseUrl,
+    probePath: config.resolvedProbePath,
     token: selectedToken,
   });
 
@@ -168,12 +193,31 @@ async function main(): Promise<void> {
 }
 
 function parseConfig(): AuthConfig {
-  const parsed = AuthConfigSchema.safeParse(process.env);
+  const parsed = RawAuthConfigSchema.safeParse(process.env);
   if (!parsed.success) {
     const issues = parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ");
     throw new Error(`Invalid auth:mcp environment: ${issues}`);
   }
-  return parsed.data;
+
+  const resolvedMcpBaseUrl = parsed.data.DEAL_FINDER_MCP_BASE_URL ?? parsed.data.MCP_BASE_URL;
+  if (!resolvedMcpBaseUrl) {
+    throw new Error("Invalid auth:mcp environment: missing MCP base URL");
+  }
+
+  const resolvedProbePath =
+    parsed.data.DEAL_FINDER_MCP_ENDPOINT_HEALTH ??
+    parsed.data.MCP_ENDPOINT_HEALTH ??
+    parsed.data.MCP_AUTH_PROBE_PATH;
+
+  const resolvedIdTokenAudience =
+    parsed.data.DEAL_FINDER_MCP_AUDIENCE ?? parsed.data.MCP_ID_TOKEN_AUDIENCE;
+
+  return {
+    ...parsed.data,
+    resolvedMcpBaseUrl,
+    resolvedProbePath,
+    resolvedIdTokenAudience,
+  };
 }
 
 function buildAuthUrl(args: {

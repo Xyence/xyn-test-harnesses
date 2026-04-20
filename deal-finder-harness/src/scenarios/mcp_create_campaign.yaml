@@ -2,7 +2,6 @@ id: mcp_create_campaign
 title: "MCP Native: Create Campaign"
 request: >
   Create a new Deal Finder campaign named "Q2 Retail Expansion Campaign" and return campaign metadata.
-allow_core_bypass: false
 expected_artifacts:
   - xyn-ui
 expected_primary_artifact: xyn-ui

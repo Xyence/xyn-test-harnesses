@@ -3,7 +3,6 @@ title: "Phase1 Minimal Paraphrase B"
 request: >
   Adjust the command palette copy for Deal Finder so users can find it with natural language,
   while keeping scope to frontend palette behavior.
-allow_core_bypass: false
 expected_artifacts:
   - xyn-ui
 expected_primary_artifact: xyn-ui

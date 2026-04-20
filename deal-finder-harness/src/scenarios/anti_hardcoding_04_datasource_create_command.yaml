@@ -2,7 +2,6 @@ id: anti-hardcoding-04-datasource-create-command
 title: "Anti-Hardcoding 04: data source create command"
 request: >
   Add a command palette action to create a Deal Finder data source from the UI and verify the new data source appears.
-allow_core_bypass: false
 expected_artifacts:
   - xyn-ui
 expected_primary_artifact: xyn-ui

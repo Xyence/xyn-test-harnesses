@@ -2,7 +2,6 @@ id: family-intent-ui-phrase-b
 title: "Family A: UI command phrasing variant B"
 request: >
   Introduce a natural language Deal Finder palette command in the UI so users can find it.
-allow_core_bypass: false
 expected_artifacts:
   - xyn-ui
 expected_primary_artifact: xyn-ui

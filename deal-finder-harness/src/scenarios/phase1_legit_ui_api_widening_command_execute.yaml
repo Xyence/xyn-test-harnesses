@@ -4,7 +4,6 @@ request: >
   Add a Deal Finder command palette action that executes immediately from the palette
   to create a datasource and return success/failure feedback, requiring UI command wiring
   and xyn-api endpoint integration.
-allow_core_bypass: false
 expected_artifacts:
   - xyn-ui
   - xyn-api

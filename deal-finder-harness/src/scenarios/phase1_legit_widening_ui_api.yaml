@@ -3,7 +3,6 @@ title: "Phase1 Legitimate Widening: xyn-ui + xyn-api"
 request: >
   Add a Deal Finder command palette action that creates a data source and persists it through
   xyn-api, including command result feedback in the UI.
-allow_core_bypass: false
 expected_artifacts:
   - xyn-ui
   - xyn-api

@@ -2,7 +2,6 @@ id: negative-control-api-migration
 title: "Negative control: API migration should not pick xyn-ui"
 request: >
   Migrate Deal Finder source contract fields in xyn-api and keep UI unchanged.
-allow_core_bypass: false
 expected_artifacts:
   - xyn-api
 expected_primary_artifact: xyn-api

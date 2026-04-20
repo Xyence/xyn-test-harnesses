@@ -2,7 +2,6 @@ id: mcp_create_update_notification_rule
 title: "MCP Native: Create And Update Notification Rule"
 request: >
   Create a notification rule for Deal Finder campaign alerts to Slack, then update the rule threshold.
-allow_core_bypass: false
 expected_artifacts:
   - xyn-ui
   - xyn-api

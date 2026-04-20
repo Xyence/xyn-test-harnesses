@@ -28,7 +28,6 @@ export interface ScenarioRunResult {
   readonly blockedReason: string | null;
   readonly failureCategory:
     | "mcp_request_failure"
-    | "schema_validation_failure"
     | "planner_mismatch"
     | "artifact_mismatch"
     | "blocked_scenario"
@@ -208,7 +207,7 @@ export class ScenarioRunner {
 
       if (mcpResult.requiresCoreXynChanges) {
         const blockedReason =
-          "blocked: scenario requires out-of-band core Xyn setup. Core bypass execution is disabled in MCP-native mode.";
+          "blocked: scenario requires out-of-band core Xyn setup, which this MCP-native harness does not execute.";
 
         scenarioResults.push({
           scenarioId: scenario.id,

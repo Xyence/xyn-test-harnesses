@@ -2,7 +2,6 @@ id: anti-hardcoding-02-palette-wording-paraphrase
 title: "Anti-Hardcoding 02: paraphrase of wording update"
 request: >
   Rephrase the Deal Finder entry in the Xyn command palette so the phrase Deal Finder is clearly visible and searchable.
-allow_core_bypass: false
 expected_artifacts:
   - xyn-ui
 expected_primary_artifact: xyn-ui

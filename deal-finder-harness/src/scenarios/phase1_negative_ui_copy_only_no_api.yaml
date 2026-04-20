@@ -3,7 +3,6 @@ title: "Phase1 Negative Control: UI Copy Only, No API Widening"
 request: >
   Update Deal Finder helper text shown in the command palette results panel only,
   explicitly avoiding any command execution or datasource persistence changes.
-allow_core_bypass: false
 expected_artifacts:
   - xyn-ui
 expected_primary_artifact: xyn-ui

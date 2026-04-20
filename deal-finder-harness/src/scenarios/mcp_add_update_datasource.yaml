@@ -2,7 +2,6 @@ id: mcp_add_update_datasource
 title: "MCP Native: Add And Update Data Source"
 request: >
   Add a new Deal Finder data source for county property records, then update its polling schedule to daily.
-allow_core_bypass: false
 expected_artifacts:
   - xyn-ui
   - xyn-api

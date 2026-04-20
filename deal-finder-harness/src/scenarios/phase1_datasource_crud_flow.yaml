@@ -3,7 +3,6 @@ title: "Phase1 DataSource CRUD Flow"
 request: >
   Implement Deal Finder data source CRUD commands in the command palette and verify create,
   update, and delete behavior in the UI flow.
-allow_core_bypass: false
 expected_artifacts:
   - xyn-ui
 expected_primary_artifact: xyn-ui

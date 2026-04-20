@@ -2,7 +2,6 @@ id: family-intent-ui-phrase-a
 title: "Family A: UI command phrasing variant A"
 request: >
   Add a Deal Finder command phrase to the Xyn command palette and make it discoverable.
-allow_core_bypass: false
 expected_artifacts:
   - xyn-ui
 expected_primary_artifact: xyn-ui

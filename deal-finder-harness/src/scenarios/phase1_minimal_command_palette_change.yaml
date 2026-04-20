@@ -3,7 +3,6 @@ title: "Phase 1 Minimal: Command palette phrase presence"
 request: >
   Add a minimal command-palette wording update for Deal Finder and produce a sibling build
   we can verify through the Xyn UI.
-allow_core_bypass: false
 expected_artifacts:
   - xyn-ui
 expected_primary_artifact: xyn-ui

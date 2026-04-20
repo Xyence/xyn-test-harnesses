@@ -3,7 +3,6 @@ title: "Phase1 Minimal Paraphrase A"
 request: >
   Make a small wording update so Deal Finder is easier to discover in the Xyn command palette,
   and keep the change focused on UI command text behavior.
-allow_core_bypass: false
 expected_artifacts:
   - xyn-ui
 expected_primary_artifact: xyn-ui

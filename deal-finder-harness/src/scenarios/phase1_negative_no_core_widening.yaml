@@ -3,7 +3,6 @@ title: "Phase1 Negative Control: No Core Widening"
 request: >
   Update only harness-facing release notes and test prompts for the Deal Finder command palette
   wording change, without touching core product artifacts.
-allow_core_bypass: false
 expected_artifacts:
   - deal-finder-harness
 expected_primary_artifact: deal-finder-harness

@@ -3,7 +3,6 @@ title: "Phase1 Minimal Paraphrase D"
 request: >
   Tune the Deal Finder natural-language command label in the Xyn palette so it reads clearly,
   without introducing backend behavior changes.
-allow_core_bypass: false
 expected_artifacts:
   - xyn-ui
 expected_primary_artifact: xyn-ui

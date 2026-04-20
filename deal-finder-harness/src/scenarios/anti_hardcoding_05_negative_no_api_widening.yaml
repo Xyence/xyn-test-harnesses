@@ -2,7 +2,6 @@ id: anti-hardcoding-05-negative-no-api-widening
 title: "Anti-Hardcoding 05: negative control should not widen to xyn-api"
 request: >
   Change only the Deal Finder command label text in the command palette UI and keep API behavior unchanged.
-allow_core_bypass: false
 expected_artifacts:
   - xyn-ui
 expected_primary_artifact: xyn-ui

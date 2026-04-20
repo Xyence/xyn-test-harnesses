@@ -2,7 +2,6 @@ id: anti-hardcoding-06-legit-ui-api-widening
 title: "Anti-Hardcoding 06: legitimate xyn-ui + xyn-api widening"
 request: >
   Add a Deal Finder command palette action that creates a data source and persists it through a new xyn-api contract endpoint.
-allow_core_bypass: false
 expected_artifacts:
   - xyn-ui
   - xyn-api

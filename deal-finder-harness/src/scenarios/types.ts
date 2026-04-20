@@ -47,7 +47,6 @@ export const ScenarioSchema = z.object({
   id: z.string().min(1),
   title: z.string().min(1),
   request: z.string().min(1),
-  allow_core_bypass: z.boolean().default(false),
   expected_artifacts: z.array(z.string().min(1)).min(1),
   expected_primary_artifact: z.string().min(1),
   optional_artifacts: z.array(z.string().min(1)).default([]),

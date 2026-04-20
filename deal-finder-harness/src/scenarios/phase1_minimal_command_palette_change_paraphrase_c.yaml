@@ -3,7 +3,6 @@ title: "Phase1 Minimal Paraphrase C"
 request: >
   Refresh Deal Finder command palette phrasing so users can discover the action faster,
   keeping implementation constrained to existing UI command copy.
-allow_core_bypass: false
 expected_artifacts:
   - xyn-ui
 expected_primary_artifact: xyn-ui

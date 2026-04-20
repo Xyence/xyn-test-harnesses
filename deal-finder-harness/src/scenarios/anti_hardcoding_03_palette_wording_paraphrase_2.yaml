@@ -2,7 +2,6 @@ id: anti-hardcoding-03-palette-wording-paraphrase-2
 title: "Anti-Hardcoding 03: second paraphrase of wording update"
 request: >
   Adjust command palette copy for Deal Finder in the UI to improve natural-language findability without changing backend logic.
-allow_core_bypass: false
 expected_artifacts:
   - xyn-ui
 expected_primary_artifact: xyn-ui

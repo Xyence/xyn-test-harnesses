@@ -38,9 +38,29 @@ For each scenario, the harness evaluates:
    - response field assertions
 
 If MCP indicates out-of-band core setup is required, the scenario is marked blocked with a clear reason.
-No quickstart or external shell fallback is executed in the default flow.
+No quickstart or external shell fallback is executed.
+
+## MCP Target Configuration
+
+This harness can target a dedicated Deal Finder MCP endpoint while preserving compatibility with generic MCP env vars.
+
+Precedence order:
+
+1. `DEAL_FINDER_MCP_BASE_URL` over `MCP_BASE_URL`
+2. `DEAL_FINDER_MCP_ENDPOINT_SUBMIT_REQUEST` over `MCP_ENDPOINT_SUBMIT_REQUEST`
+3. `DEAL_FINDER_MCP_ENDPOINT_HEALTH` over `MCP_ENDPOINT_HEALTH` (default `/mcp`)
+4. `DEAL_FINDER_MCP_AUDIENCE` over `MCP_ID_TOKEN_AUDIENCE`
+
+Notes:
+
+- `auth:mcp` and harness runtime both use the same target precedence.
+- Auth is unchanged: OAuth token acquisition/caching still uses the existing token bootstrap flow and bearer-token model.
+- If using `id_token` mode, audience validation uses the resolved audience value from the precedence rules above.
 
 ## Reports
 
 - Main report: `artifacts/reports/latest.json`
 - Raw MCP payload snapshots per scenario: `artifacts/reports/mcp-raw/<scenario-id>.json`
+- Summary includes:
+  - `artifactSelectionDifferenceViolations`: scenarios in the same differ-group selected identical artifact sets
+  - `cannedPlanViolations`: near-identical planner output detected across unrelated scenarios

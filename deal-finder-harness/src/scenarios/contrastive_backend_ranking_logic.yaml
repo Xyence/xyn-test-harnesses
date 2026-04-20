@@ -2,7 +2,6 @@ id: contrastive-backend-ranking-logic
 title: "Contrastive: backend ranking logic"
 request: >
   Change Deal Finder ranking behavior for command suggestions by updating backend scoring logic.
-allow_core_bypass: false
 expected_artifacts:
   - xyn-api
 expected_primary_artifact: xyn-api
