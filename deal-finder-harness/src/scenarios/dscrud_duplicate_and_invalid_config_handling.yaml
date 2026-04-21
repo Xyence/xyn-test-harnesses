@@ -1,0 +1,39 @@
+id: dscrud_duplicate_and_invalid_config_handling
+suite: deal-finder-datasource-crud
+title: "Deal Finder DataSource CRUD: Duplicate Key And Invalid Config Handling"
+request: >
+  Validate St. Louis data-source definition guardrails by rejecting duplicate keys
+  and invalid source configuration through MCP calls.
+expected_artifacts:
+  - xyn-ui
+expected_primary_artifact: xyn-ui
+optional_artifacts:
+  - xyn-api
+forbidden_artifacts: []
+accepted_dependency_reasons:
+  - ui_command_requires_api_route_registration
+planner_expectations:
+  should_use_mcp: true
+  may_require_core_xyn_changes: false
+  success_criteria:
+    - Planner includes validation and error handling for source definitions.
+    - Planner avoids silent overwrite behavior.
+  required_phrases:
+    - source
+  forbidden_phrases: []
+deployment:
+  mode: preview
+  requires_xyn_api: true
+  require_branch_isolation: false
+datasource_crud:
+  fixture_ids:
+    - building_permits_mdb
+  include_ingest_smoke: false
+assertions:
+  expected_operations:
+    - datasource_create
+    - datasource_duplicate_key_rejected
+    - datasource_invalid_config_rejected
+  expected_response_fields:
+    - path: submitRequest.endpointTarget.submitEndpoint
+      equals: "/mcp"

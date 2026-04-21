@@ -1,0 +1,42 @@
+id: dscrud_delete_recreate_source_capability
+suite: deal-finder-datasource-crud
+title: "Deal Finder DataSource CRUD: Delete/Recreate Capability Check"
+request: >
+  For St. Louis inspection source definitions, test disable/enable and delete/recreate behavior.
+  If delete is unsupported, return explicit capability signal and continue with recreate flow.
+expected_artifacts:
+  - xyn-ui
+expected_primary_artifact: xyn-ui
+optional_artifacts:
+  - xyn-api
+forbidden_artifacts: []
+accepted_dependency_reasons:
+  - ui_command_requires_api_route_registration
+planner_expectations:
+  should_use_mcp: true
+  may_require_core_xyn_changes: false
+  success_criteria:
+    - Planner addresses delete/recreate handling explicitly.
+    - Planner preserves MCP-native source management flow.
+  required_phrases:
+    - source
+  forbidden_phrases: []
+deployment:
+  mode: preview
+  requires_xyn_api: true
+  require_branch_isolation: false
+datasource_crud:
+  fixture_ids:
+    - inspections_mdb
+  include_ingest_smoke: false
+assertions:
+  expected_operations:
+    - datasource_create
+    - datasource_read
+    - datasource_list
+    - datasource_update
+    - datasource_delete_attempted
+    - datasource_recreate
+  expected_response_fields:
+    - path: submitRequest.endpointTarget.submitEndpoint
+      equals: "/mcp"

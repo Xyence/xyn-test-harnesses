@@ -1,0 +1,49 @@
+id: dscrud_create_read_update_toggle_file_backed
+suite: deal-finder-datasource-crud
+title: "Deal Finder DataSource CRUD: File-Backed Create/Read/Update/Toggle"
+request: >
+  Configure Deal Finder data-source CRUD for seeded St. Louis file-backed parcel fixtures.
+  Create, read/list, update cadence, disable, and re-enable the source definition through MCP.
+expected_artifacts:
+  - xyn-ui
+expected_primary_artifact: xyn-ui
+optional_artifacts:
+  - xyn-api
+forbidden_artifacts: []
+accepted_dependency_reasons:
+  - ui_command_requires_api_route_registration
+planner_expectations:
+  should_use_mcp: true
+  may_require_core_xyn_changes: false
+  success_criteria:
+    - Planner includes data source CRUD and toggle steps.
+    - Planner includes validation or status checks.
+  required_phrases:
+    - source
+  forbidden_phrases: []
+deployment:
+  mode: preview
+  requires_xyn_api: true
+  require_branch_isolation: false
+datasource_crud:
+  fixture_ids:
+    - current_parcels_shapefile
+    - parcel_tax_records_mdb
+    - housing_conservation_inspections_mdb
+  include_ingest_smoke: false
+assertions:
+  expected_operations:
+    - datasource_create
+    - datasource_read
+    - datasource_list
+    - datasource_update
+    - datasource_toggle_checked
+  expected_entities_created:
+    - type: datasource
+      name_contains: st. louis
+  expected_entities_updated:
+    - type: datasource
+      name_contains: st. louis
+  expected_response_fields:
+    - path: submitRequest.endpointTarget.submitEndpoint
+      equals: "/mcp"

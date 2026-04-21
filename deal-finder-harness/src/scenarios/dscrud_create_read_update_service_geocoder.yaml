@@ -1,0 +1,48 @@
+id: dscrud_create_read_update_service_geocoder
+suite: deal-finder-datasource-crud
+title: "Deal Finder DataSource CRUD: Service + Geocoder Source Definitions"
+request: >
+  Configure Deal Finder service-backed and geocoder source definitions for St. Louis,
+  then verify create/read/list/update behavior through MCP.
+expected_artifacts:
+  - xyn-ui
+expected_primary_artifact: xyn-api
+optional_artifacts:
+  - xyn-api
+forbidden_artifacts: []
+accepted_dependency_reasons:
+  - ui_command_requires_api_route_registration
+planner_expectations:
+  should_use_mcp: true
+  may_require_core_xyn_changes: false
+  success_criteria:
+    - Planner includes service or geocoder source configuration steps.
+    - Planner includes persistence and validation checks.
+  required_phrases:
+    - source
+  forbidden_phrases: []
+deployment:
+  mode: preview
+  requires_xyn_api: true
+  require_branch_isolation: false
+datasource_crud:
+  fixture_ids:
+    - street_geocoder
+    - parcel_geocoder
+    - csb_service_requests
+  include_ingest_smoke: false
+assertions:
+  expected_operations:
+    - datasource_create
+    - datasource_read
+    - datasource_list
+    - datasource_update
+  expected_entities_created:
+    - type: datasource
+      name_contains: st. louis
+  expected_entities_updated:
+    - type: datasource
+      name_contains: st. louis
+  expected_response_fields:
+    - path: submitRequest.endpointTarget.submitEndpoint
+      equals: "/mcp"

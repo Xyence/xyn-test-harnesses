@@ -1,4 +1,5 @@
 import type { ScenarioDefinition } from "../scenarios/types";
+import { stLouisFixture, type StLouisSourceFixture } from "../fixtures/stLouisSources";
 
 interface McpEndpointMap {
   readonly submitRequest: string;
@@ -454,7 +455,7 @@ async function submitDevelopmentRequestViaMcpProtocol(
       }
 
       let dealFinderFlowActions: unknown = null;
-      if (scenario.suite === "deal-finder-mcp") {
+      if (scenario.suite === "deal-finder-mcp" || scenario.suite === "deal-finder-datasource-crud") {
         const workspaceId =
           extractFirstString(createSession, [["response", "raw", "session", "workspace_id"]]) ??
           extractFirstString(sessionPlan, [["response", "raw", "session", "workspace_id"]]) ??
@@ -609,6 +610,7 @@ async function runDealFinderFlowActions(args: {
   if (!workspaceId) {
     throw new Error(`Deal Finder MCP flow requires workspace_id; scenario=${args.scenario.id}`);
   }
+  const runSuffix = `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
   if (args.scenario.id === "mcp_create_campaign") {
     const createCampaign = await callMcpTool(args.config, args.token, args.sessionId, "create_campaign", {
@@ -629,7 +631,7 @@ async function runDealFinderFlowActions(args: {
   }
 
   if (args.scenario.id === "mcp_add_update_datasource") {
-    const uniqueSuffix = String(Date.now());
+    const uniqueSuffix = runSuffix;
     const createDataSource = await callMcpTool(args.config, args.token, args.sessionId, "create_data_source", {
       key: `county-property-records-${uniqueSuffix}`,
       name: `County Property Records ${uniqueSuffix}`,
@@ -669,7 +671,7 @@ async function runDealFinderFlowActions(args: {
   }
 
   if (args.scenario.id === "mcp_create_update_notification_rule") {
-    const uniqueAddress = `alerts+deal-finder-${Date.now()}@xyence.io`;
+    const uniqueAddress = `alerts+deal-finder-${runSuffix}@xyence.io`;
     const createNotificationRule = await callMcpTool(args.config, args.token, args.sessionId, "create_notification_rule", {
       workspace_id: workspaceId,
       address: uniqueAddress,
@@ -710,7 +712,327 @@ async function runDealFinderFlowActions(args: {
     };
   }
 
+  if (args.scenario.suite === "deal-finder-datasource-crud") {
+    if (args.scenario.id === "dscrud_create_read_update_toggle_file_backed") {
+      const configuredFixtureIds = args.scenario.datasource_crud?.fixture_ids ?? [];
+      const fixtureIds =
+        configuredFixtureIds.length > 0
+          ? configuredFixtureIds
+          : ["current_parcels_shapefile", "parcel_tax_records_mdb"];
+      const raw: Record<string, unknown> = {};
+      const operations: string[] = [];
+      const entities: Record<string, unknown>[] = [];
+      for (const fixtureId of fixtureIds) {
+        const fixture = stLouisFixture(fixtureId);
+        const result = await runStLouisDataSourceCrudFlow({
+          ...args,
+          fixture,
+          workspaceId,
+          runSuffix: `${runSuffix}-${fixture.fixtureId}`,
+          includeToggle: true,
+          includeDeleteAttempt: false,
+          includeIngestSmoke: Boolean(args.scenario.datasource_crud?.include_ingest_smoke),
+        });
+        raw[fixture.fixtureId] = result;
+        operations.push(...extractStringArray(result.operations));
+        entities.push(...extractObjectArray(result.entities));
+      }
+      return {
+        suite: "deal-finder-datasource-crud",
+        operations: dedupeStrings(operations),
+        entities,
+        raw,
+      };
+    }
+
+    if (args.scenario.id === "dscrud_create_read_update_service_geocoder") {
+      const configuredFixtureIds = args.scenario.datasource_crud?.fixture_ids ?? [];
+      const fixtureIds =
+        configuredFixtureIds.length > 0
+          ? configuredFixtureIds
+          : ["street_geocoder", "parcel_geocoder", "csb_service_requests"];
+      const fixtures = fixtureIds.map((fixtureId) => stLouisFixture(fixtureId));
+      const raw: Record<string, unknown> = {};
+      const operations: string[] = [];
+      const entities: Record<string, unknown>[] = [];
+      for (const fixture of fixtures) {
+        const result = await runStLouisDataSourceCrudFlow({
+          ...args,
+          fixture,
+          workspaceId,
+          runSuffix: `${runSuffix}-${fixture.fixtureId}`,
+          includeToggle: false,
+          includeDeleteAttempt: false,
+          includeIngestSmoke: false,
+        });
+        raw[fixture.fixtureId] = result;
+        operations.push(...extractStringArray(result.operations));
+        entities.push(...extractObjectArray(result.entities));
+      }
+      return {
+        suite: "deal-finder-datasource-crud",
+        operations: dedupeStrings(operations),
+        entities,
+        raw,
+      };
+    }
+
+    if (args.scenario.id === "dscrud_delete_recreate_source_capability") {
+      const configuredFixtureId =
+        args.scenario.datasource_crud?.fixture_ids && args.scenario.datasource_crud.fixture_ids.length > 0
+          ? args.scenario.datasource_crud.fixture_ids[0]
+          : "inspections_mdb";
+      const fixture = stLouisFixture(configuredFixtureId);
+      return await runStLouisDataSourceCrudFlow({
+        ...args,
+        fixture,
+        workspaceId,
+        runSuffix,
+        includeToggle: true,
+        includeDeleteAttempt: true,
+        includeIngestSmoke: false,
+      });
+    }
+
+    if (args.scenario.id === "dscrud_duplicate_and_invalid_config_handling") {
+      const configuredFixtureId =
+        args.scenario.datasource_crud?.fixture_ids && args.scenario.datasource_crud.fixture_ids.length > 0
+          ? args.scenario.datasource_crud.fixture_ids[0]
+          : "building_permits_mdb";
+      const fixture = stLouisFixture(configuredFixtureId);
+      const sourceKey = `${fixture.baseKey}-${runSuffix}`;
+      const sourceName = `${fixture.baseName} ${runSuffix}`;
+      const createDataSource = await callMcpTool(args.config, args.token, args.sessionId, "create_data_source", {
+        key: sourceKey,
+        name: sourceName,
+        source_type: fixture.sourceType,
+        source_mode: fixture.sourceMode,
+        refresh_cadence_seconds: fixture.refreshCadenceSeconds,
+        payload: {
+          configuration: fixture.configuration,
+          metadata: fixture.metadata,
+        },
+      });
+      const duplicateAttempt = await callMcpToolAllowFailure(args.config, args.token, args.sessionId, "create_data_source", {
+        key: sourceKey,
+        name: `${sourceName} duplicate`,
+        source_type: fixture.sourceType,
+        source_mode: fixture.sourceMode,
+        refresh_cadence_seconds: fixture.refreshCadenceSeconds,
+        payload: {
+          configuration: fixture.configuration,
+          metadata: fixture.metadata,
+        },
+      });
+      const invalidAttempt = await callMcpToolAllowFailure(args.config, args.token, args.sessionId, "create_data_source", {
+        key: `${sourceKey}-invalid`,
+        name: `${sourceName} invalid`,
+        source_type: fixture.sourceType,
+        source_mode: "not_a_mode",
+        refresh_cadence_seconds: fixture.refreshCadenceSeconds,
+      });
+      const operations = ["datasource_create"];
+      if (!duplicateAttempt.ok) {
+        operations.push("datasource_duplicate_key_rejected");
+      }
+      if (!invalidAttempt.ok) {
+        operations.push("datasource_invalid_config_rejected");
+      }
+      return {
+        suite: "deal-finder-datasource-crud",
+        operations,
+        entities: [
+          {
+            type: "datasource",
+            name: sourceName,
+          },
+        ],
+        raw: {
+          createDataSource,
+          duplicateAttempt,
+          invalidAttempt,
+        },
+      };
+    }
+
+    if (args.scenario.id === "dscrud_ingest_smoke_optional") {
+      const configuredFixtureId =
+        args.scenario.datasource_crud?.fixture_ids && args.scenario.datasource_crud.fixture_ids.length > 0
+          ? args.scenario.datasource_crud.fixture_ids[0]
+          : "building_permits_mdb";
+      const fixture = stLouisFixture(configuredFixtureId);
+      return await runStLouisDataSourceCrudFlow({
+        ...args,
+        fixture,
+        workspaceId,
+        runSuffix,
+        includeToggle: false,
+        includeDeleteAttempt: false,
+        includeIngestSmoke: true,
+      });
+    }
+  }
+
   return { operation: "none", note: "No Deal Finder flow action defined for this scenario" };
+}
+
+async function runStLouisDataSourceCrudFlow(args: {
+  config: McpDevelopmentConfig;
+  token: string;
+  sessionId: string;
+  fixture: StLouisSourceFixture;
+  workspaceId: string;
+  runSuffix: string;
+  includeToggle: boolean;
+  includeDeleteAttempt: boolean;
+  includeIngestSmoke: boolean;
+}): Promise<Record<string, unknown>> {
+  const sourceKey = `${args.fixture.baseKey}-${args.runSuffix}`;
+  const sourceName = `${args.fixture.baseName} ${args.runSuffix}`;
+  const createDataSource = await callMcpTool(args.config, args.token, args.sessionId, "create_data_source", {
+    key: sourceKey,
+    name: sourceName,
+    source_type: args.fixture.sourceType,
+    source_mode: args.fixture.sourceMode,
+    refresh_cadence_seconds: args.fixture.refreshCadenceSeconds,
+    payload: {
+      configuration: args.fixture.configuration,
+      metadata: {
+        ...args.fixture.metadata,
+        parser_kind: args.fixture.parserKind,
+        location_url: args.fixture.locationUrl,
+      },
+    },
+  });
+  const sourceId =
+    extractFirstString(createDataSource, [["response", "data_source", "id"]]) ??
+    extractFirstString(createDataSource, [["response", "source_connector", "id"]]) ??
+    extractFirstString(createDataSource, [["data_source", "id"]]);
+  if (!sourceId) {
+    throw new Error(`create_data_source returned no source id; raw=${safeStringify(createDataSource)}`);
+  }
+
+  const getDataSource = await callMcpTool(args.config, args.token, args.sessionId, "get_data_source", {
+    source_id: sourceId,
+    workspace_id: args.workspaceId,
+  });
+  const listDataSources = await callMcpTool(args.config, args.token, args.sessionId, "list_data_sources", {
+    workspace_id: args.workspaceId,
+  });
+  const updateDataSource = await callMcpTool(args.config, args.token, args.sessionId, "update_data_source", {
+    source_id: sourceId,
+    workspace_id: args.workspaceId,
+    payload: {
+      refresh_cadence_seconds: Math.max(60, Math.floor(args.fixture.refreshCadenceSeconds / 2)),
+      metadata: {
+        ...args.fixture.metadata,
+        updated_by_harness: true,
+      },
+    },
+  });
+
+  const operations: string[] = ["datasource_create", "datasource_read", "datasource_list", "datasource_update"];
+  const raw: Record<string, unknown> = {
+    fixture: args.fixture,
+    createDataSource,
+    getDataSource,
+    listDataSources,
+    updateDataSource,
+  };
+
+  if (args.includeToggle) {
+    operations.push("datasource_toggle_checked");
+    const pauseDataSource = await callMcpToolAllowFailure(args.config, args.token, args.sessionId, "pause_data_source", {
+      source_id: sourceId,
+      workspace_id: args.workspaceId,
+    });
+    const activateDataSource = await callMcpToolAllowFailure(args.config, args.token, args.sessionId, "activate_data_source", {
+      source_id: sourceId,
+      workspace_id: args.workspaceId,
+    });
+    raw.pauseDataSource = pauseDataSource;
+    raw.activateDataSource = activateDataSource;
+    if (pauseDataSource.ok) {
+      operations.push("datasource_disable");
+    }
+    if (activateDataSource.ok) {
+      operations.push("datasource_enable");
+    }
+  }
+
+  if (args.includeDeleteAttempt) {
+    operations.push("datasource_delete_attempted");
+    const deleteDataSource = await callMcpToolAllowFailure(args.config, args.token, args.sessionId, "delete_data_source", {
+      source_id: sourceId,
+      workspace_id: args.workspaceId,
+    });
+    raw.deleteDataSource = deleteDataSource;
+    if (deleteDataSource.ok) {
+      operations.push("datasource_delete");
+    } else {
+      operations.push("datasource_delete_unsupported");
+    }
+    const recreateDataSource = await callMcpTool(args.config, args.token, args.sessionId, "create_data_source", {
+      key: `${sourceKey}-recreate`,
+      name: `${sourceName} Recreate`,
+      source_type: args.fixture.sourceType,
+      source_mode: args.fixture.sourceMode,
+      refresh_cadence_seconds: args.fixture.refreshCadenceSeconds,
+      payload: {
+        configuration: args.fixture.configuration,
+        metadata: {
+          ...args.fixture.metadata,
+          recreated: true,
+        },
+      },
+    });
+    raw.recreateDataSource = recreateDataSource;
+    operations.push("datasource_recreate");
+  }
+
+  if (args.includeIngestSmoke) {
+    operations.push("datasource_ingest_smoke_checked");
+    const refreshDataSource = await callMcpToolAllowFailure(args.config, args.token, args.sessionId, "refresh_data_source", {
+      source_id: sourceId,
+      workspace_id: args.workspaceId,
+    });
+    raw.refreshDataSource = refreshDataSource;
+    if (refreshDataSource.ok) {
+      operations.push("datasource_ingest_requested");
+    } else {
+      operations.push("datasource_ingest_capability_not_exposed");
+    }
+  }
+
+  return {
+    suite: "deal-finder-datasource-crud",
+    operations: dedupeStrings(operations),
+    entities: [
+      {
+        type: "datasource",
+        id: sourceId,
+        key: sourceKey,
+        name: sourceName,
+        fixture_id: args.fixture.fixtureId,
+      },
+    ],
+    raw,
+  };
+}
+
+async function callMcpToolAllowFailure(
+  config: McpDevelopmentConfig,
+  token: string,
+  sessionId: string,
+  toolName: string,
+  args: Record<string, unknown>,
+): Promise<{ ok: boolean; result?: Record<string, unknown>; error?: unknown }> {
+  try {
+    const result = await callMcpTool(config, token, sessionId, toolName, args);
+    return { ok: true, result };
+  } catch (error: unknown) {
+    return { ok: false, error: error instanceof Error ? error.message : error };
+  }
 }
 
 function buildScenarioPlannerMetadata(scenario: ScenarioDefinition): Record<string, unknown> {
@@ -1295,6 +1617,22 @@ function buildArtifactIdToLabelMap(sources: readonly unknown[]): Map<string, str
     }
   }
   return map;
+}
+
+function extractStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter((item) => item.length > 0);
+}
+
+function extractObjectArray(value: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter((item) => typeof item === "object" && item !== null) as Record<string, unknown>[];
 }
 
 function dedupeStrings(values: readonly string[]): string[] {

@@ -1,0 +1,40 @@
+id: dscrud_ingest_smoke_optional
+suite: deal-finder-datasource-crud
+title: "Deal Finder DataSource CRUD: Optional Ingest Smoke Check"
+request: >
+  Configure a St. Louis source definition and run optional ingest smoke checks through MCP
+  if ingest trigger/status capabilities are exposed.
+expected_artifacts:
+  - xyn-ui
+expected_primary_artifact: xyn-ui
+optional_artifacts:
+  - xyn-api
+forbidden_artifacts: []
+accepted_dependency_reasons:
+  - ui_command_requires_api_route_registration
+planner_expectations:
+  should_use_mcp: true
+  may_require_core_xyn_changes: false
+  success_criteria:
+    - Planner includes source definition and smoke verification steps.
+  required_phrases:
+    - source
+  forbidden_phrases: []
+deployment:
+  mode: preview
+  requires_xyn_api: true
+  require_branch_isolation: false
+datasource_crud:
+  fixture_ids:
+    - building_permits_mdb
+  include_ingest_smoke: true
+assertions:
+  expected_operations:
+    - datasource_create
+    - datasource_read
+    - datasource_list
+    - datasource_update
+    - datasource_ingest_smoke_checked
+  expected_response_fields:
+    - path: submitRequest.endpointTarget.submitEndpoint
+      equals: "/mcp"
