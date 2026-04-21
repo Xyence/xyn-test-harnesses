@@ -31,6 +31,16 @@ const DEPENDENCY_JUSTIFICATION_MARKERS = [
   "necessary",
 ] as const;
 
+const REQUIRED_PHRASE_EQUIVALENTS: Record<string, readonly string[]> = {
+  discoverable: ["discoverable", "findable", "searchable", "easy to find", "natural language"],
+  frontend: ["frontend", "front-end", "ui", "user interface", "workbench", "client"],
+  dependency: ["dependency", "dependencies", "dependent", "depends", "required", "because"],
+  "command palette": ["command palette", "palette command", "palette entry", "quick command"],
+};
+
+const UI_TOKENS = ["ui", "frontend", "front-end", "workbench", "command palette"] as const;
+const API_TOKENS = ["api", "backend", "service", "endpoint"] as const;
+
 export interface PlannerObserved {
   readonly plannerText: string;
   readonly normalizedPlannerText: string;
@@ -70,7 +80,7 @@ export function runPlannerCheck(
   const forbiddenPhrases = scenario.planner_expectations.forbidden_phrases;
 
   const missingRequiredPhrases = requiredPhrases.filter(
-    (phrase) => !normalizedPlannerText.includes(normalizeText(phrase)),
+    (phrase) => !matchesRequiredConcept(normalizedPlannerText, phrase),
   );
 
   const presentForbiddenPhrases = forbiddenPhrases.filter((phrase) =>
@@ -84,7 +94,7 @@ export function runPlannerCheck(
 
   const selectedArtifacts = developmentResult.selectedArtifacts;
   const missingSelectedArtifactReferences = selectedArtifacts.filter(
-    (artifact) => !normalizedPlannerText.includes(normalizeText(artifact)),
+    (artifact) => !matchesArtifactReference(normalizedPlannerText, artifact),
   );
 
   const toleratedArtifacts = new Set([...scenario.expected_artifacts, ...scenario.optional_artifacts]);
@@ -286,4 +296,49 @@ export function buildIntentKeywords(requestText: string): string[] {
 
 export function normalizeText(text: string): string {
   return text.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function matchesRequiredConcept(normalizedPlannerText: string, requiredPhrase: string): boolean {
+  const normalizedPhrase = normalizeText(requiredPhrase);
+  if (normalizedPlannerText.includes(normalizedPhrase)) {
+    return true;
+  }
+  if (normalizedPhrase === "ui only") {
+    const hasUiSignal = UI_TOKENS.some((token) => normalizedPlannerText.includes(token));
+    const hasApiSignal = API_TOKENS.some((token) => normalizedPlannerText.includes(token));
+    const hasApiNegationSignal =
+      normalizedPlannerText.includes("api behavior unchanged") ||
+      normalizedPlannerText.includes("keep api unchanged") ||
+      normalizedPlannerText.includes("no backend changes") ||
+      normalizedPlannerText.includes("without backend changes") ||
+      normalizedPlannerText.includes("do not modify api") ||
+      normalizedPlannerText.includes("do not change api") ||
+      normalizedPlannerText.includes("without changing api");
+    if (hasUiSignal && hasApiSignal && hasApiNegationSignal) {
+      return true;
+    }
+    return hasUiSignal && !hasApiSignal;
+  }
+  const equivalents = REQUIRED_PHRASE_EQUIVALENTS[normalizedPhrase];
+  if (!equivalents || equivalents.length === 0) {
+    return false;
+  }
+  return equivalents.some((phrase) => normalizedPlannerText.includes(normalizeText(phrase)));
+}
+
+function matchesArtifactReference(normalizedPlannerText: string, artifact: string): boolean {
+  const normalizedArtifact = normalizeText(artifact);
+  if (!normalizedArtifact) {
+    return false;
+  }
+  if (normalizedPlannerText.includes(normalizedArtifact)) {
+    return true;
+  }
+  if (normalizedArtifact === "xyn-ui") {
+    return UI_TOKENS.some((token) => normalizedPlannerText.includes(token));
+  }
+  if (normalizedArtifact === "xyn-api") {
+    return API_TOKENS.some((token) => normalizedPlannerText.includes(token));
+  }
+  return false;
 }

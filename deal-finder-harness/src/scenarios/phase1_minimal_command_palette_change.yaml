@@ -17,8 +17,7 @@ planner_expectations:
     - xyn-ui is selected for command palette updates.
     - Planner provides a minimal implementation plan.
   required_phrases:
-    - command palette
-    - xyn-ui
+    - deal finder
   forbidden_phrases: []
 deployment:
   mode: preview

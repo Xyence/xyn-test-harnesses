@@ -43,14 +43,20 @@ const McpAssertionsSchema = z.object({
   require_url_check: z.boolean().default(false),
 });
 
+const ScenarioSuiteSchema = z.enum(["planner-regression", "deal-finder-mcp"]);
+
 export const ScenarioSchema = z.object({
   id: z.string().min(1),
+  suite: ScenarioSuiteSchema.optional(),
   title: z.string().min(1),
   request: z.string().min(1),
   expected_artifacts: z.array(z.string().min(1)).min(1),
   expected_primary_artifact: z.string().min(1),
   optional_artifacts: z.array(z.string().min(1)).default([]),
   forbidden_artifacts: z.array(z.string().min(1)).default([]),
+  hard_forbidden_artifacts: z.array(z.string().min(1)).default([]),
+  hard_required_artifacts: z.array(z.string().min(1)).default([]),
+  target_source_files: z.array(z.string().min(1)).default([]),
   accepted_dependency_reasons: z.array(z.string().min(1)).default([]),
   artifact_selection_differ_group: z.string().min(1).optional(),
   planner_expectations: PlannerExpectationsSchema,
@@ -67,6 +73,7 @@ export const ScenarioSchema = z.object({
 });
 
 export type ScenarioDefinition = z.infer<typeof ScenarioSchema>;
+export type ScenarioSuite = z.infer<typeof ScenarioSuiteSchema>;
 export type McpAssertions = z.infer<typeof McpAssertionsSchema>;
 export type ExpectedEntity = z.infer<typeof ExpectedEntitySchema>;
 export type ExpectedResponseField = z.infer<typeof ExpectedResponseFieldSchema>;

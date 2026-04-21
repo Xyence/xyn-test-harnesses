@@ -7,6 +7,7 @@
     "dev": "tsx src/index.ts",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test --import tsx src/tests/**/*.test.ts",
     "start": "node dist/index.js",
     "auth:mcp": "tsx src/auth/mcpAuthBootstrap.ts"
   },

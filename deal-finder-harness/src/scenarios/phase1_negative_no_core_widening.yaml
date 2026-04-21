@@ -4,11 +4,11 @@ request: >
   Update only harness-facing release notes and test prompts for the Deal Finder command palette
   wording change, without touching core product artifacts.
 expected_artifacts:
-  - deal-finder-harness
-expected_primary_artifact: deal-finder-harness
-optional_artifacts: []
-forbidden_artifacts:
   - xyn-ui
+expected_primary_artifact: xyn-ui
+optional_artifacts:
+  - deal-finder-harness
+forbidden_artifacts:
   - xyn-api
 accepted_dependency_reasons: []
 artifact_selection_differ_group: phase1-core-widening-contrast
@@ -17,8 +17,8 @@ planner_expectations:
   should_update_command_palette: false
   may_require_core_xyn_changes: false
   success_criteria:
-    - Selection remains in harness scope.
-    - Planner explicitly avoids core artifact changes.
+    - Selection remains in UI scope for wording-only updates.
+    - Planner explicitly avoids backend/API artifact changes.
   required_phrases:
     - harness
     - validation

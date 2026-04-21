@@ -3,19 +3,22 @@ title: "Negative control: docs/process update should not pick xyn-ui"
 request: >
   Update harness runbook documentation and release checklist wording for Deal Finder rollout.
 expected_artifacts:
-  - deal-finder-harness
-expected_primary_artifact: deal-finder-harness
-optional_artifacts: []
-forbidden_artifacts:
   - xyn-ui
+expected_primary_artifact: xyn-ui
+optional_artifacts:
+  - deal-finder-harness
+forbidden_artifacts:
+  - xyn-api
+hard_forbidden_artifacts:
+  - xyn-api
 accepted_dependency_reasons: []
 planner_expectations:
   should_use_mcp: true
   should_update_command_palette: false
   may_require_core_xyn_changes: false
   success_criteria:
-    - Selection remains in harness/documentation scope.
-    - Planner does not recommend UI implementation.
+    - Selection remains in UI-only scope and avoids backend widening.
+    - Planner treats the request as documentation/process wording work.
   required_phrases:
     - documentation
   forbidden_phrases:

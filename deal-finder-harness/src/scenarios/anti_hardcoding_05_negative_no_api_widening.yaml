@@ -8,6 +8,8 @@ expected_primary_artifact: xyn-ui
 optional_artifacts: []
 forbidden_artifacts:
   - xyn-api
+hard_forbidden_artifacts:
+  - xyn-api
 accepted_dependency_reasons:
   - ui_depends_on_shared_command_schema
 planner_expectations:

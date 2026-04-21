@@ -55,10 +55,14 @@ async function main(): Promise<void> {
   });
 
   const discovered = await discoverScenarios();
+  const suiteFilteredScenarios =
+    env.HARNESS_SCENARIO_SUITE === "all"
+      ? discovered
+      : discovered.filter((scenario) => scenario.suite === env.HARNESS_SCENARIO_SUITE);
   const scenarios =
     env.HARNESS_SCENARIO_ID === "all"
-      ? discovered
-      : discovered.filter((scenario) => scenario.id === env.HARNESS_SCENARIO_ID);
+      ? suiteFilteredScenarios
+      : suiteFilteredScenarios.filter((scenario) => scenario.id === env.HARNESS_SCENARIO_ID);
 
   if (scenarios.length === 0) {
     throw new Error(`Scenario '${env.HARNESS_SCENARIO_ID}' not found in src/scenarios`);
@@ -76,6 +80,7 @@ async function main(): Promise<void> {
 
   const summary = {
     scenarioId: env.HARNESS_SCENARIO_ID,
+    suite: env.HARNESS_SCENARIO_SUITE,
     totalScenarios: report.summary.totalScenarios,
     passedScenarios: report.summary.passedScenarios,
     failedScenarios: report.summary.failedScenarios,
@@ -85,6 +90,7 @@ async function main(): Promise<void> {
     entityAssertionMismatches: report.summary.entityAssertionMismatches,
     artifactSelectionDifferenceViolations: report.summary.artifactSelectionDifferenceViolations,
     cannedPlanViolations: report.summary.cannedPlanViolations,
+    suiteSummaries: report.summary.suiteSummaries,
     latestReportPath: `${env.ARTIFACTS_DIR}/reports/latest.json`,
   };
 

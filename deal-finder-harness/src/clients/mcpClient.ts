@@ -55,6 +55,8 @@ export interface ArtifactSelectionDetail {
 export interface DevelopmentRequestResult {
   readonly requestText: string;
   readonly selectedArtifacts: readonly string[];
+  readonly initialSuggestedArtifacts: readonly string[];
+  readonly finalSelectedArtifacts: readonly string[];
   readonly primaryArtifact: string;
   readonly dependentArtifacts: readonly string[];
   readonly artifactDetails: readonly ArtifactSelectionDetail[];
@@ -79,6 +81,13 @@ interface MutableRawResponses {
   siblingInfo: unknown;
   siblingUrl: unknown;
   branchInfo: unknown;
+}
+
+interface ArtifactSelectionResolution {
+  readonly initialSuggestedArtifacts: readonly string[];
+  readonly finalSelectedArtifacts: readonly string[];
+  readonly primaryArtifact: string;
+  readonly dependentArtifacts: readonly string[];
 }
 
 export interface McpScenarioPlanResult {
@@ -222,6 +231,7 @@ async function submitDevelopmentRequestViaRest(
       scenarioTitle: scenario.title,
       expectedArtifacts: scenario.expected_artifacts,
       expectedPrimaryArtifact: scenario.expected_primary_artifact,
+      metadata: buildScenarioPlannerMetadata(scenario),
     },
   });
 
@@ -293,33 +303,6 @@ async function submitDevelopmentRequestViaRest(
   const selectedArtifactsFromDetails =
     artifactDetails.length > 0 ? artifactDetails.map((detail) => detail.artifact) : undefined;
 
-  const selectedArtifacts =
-    selectedArtifactsFromDetails ??
-    extractFirstStringArray(submitResponse.data, [
-      ["selectedArtifacts"],
-      ["selected_artifacts"],
-      ["artifactSelection", "selectedArtifacts"],
-      ["artifacts", "selected"],
-    ]) ??
-    extractFirstStringArray(artifactSelectionResponse, [
-      ["selectedArtifacts"],
-      ["selected_artifacts"],
-      ["artifacts", "selected"],
-    ]);
-
-  const primaryArtifact =
-    extractFirstString(submitResponse.data, [
-      ["primaryArtifact"],
-      ["primary_artifact"],
-      ["artifactSelection", "primaryArtifact"],
-      ["artifacts", "primary"],
-    ]) ??
-    extractFirstString(artifactSelectionResponse, [
-      ["primaryArtifact"],
-      ["primary_artifact"],
-      ["artifacts", "primary"],
-    ]);
-
   const plannerPlan =
     resolvePlannerPlan({
       submitResponse: submitResponse.data,
@@ -344,27 +327,20 @@ async function submitDevelopmentRequestViaRest(
       `missing-backend-field: branchName is required for branch-isolated scenario '${scenario.id}' but was not present in MCP REST response payloads; rawResponses=${safeStringify(rawResponses)}`,
     );
   }
-
-  const dependentArtifacts =
-    extractFirstStringArray(submitResponse.data, [
-      ["dependentArtifacts"],
-      ["dependent_artifacts"],
-      ["artifacts", "dependent"],
-    ]) ??
-    extractFirstStringArray(artifactSelectionResponse, [
-      ["dependentArtifacts"],
-      ["dependent_artifacts"],
-      ["artifacts", "dependent"],
-    ]) ??
-    (selectedArtifacts && primaryArtifact
-      ? selectedArtifacts.filter((artifact) => artifact !== primaryArtifact)
-      : undefined);
+  const artifactSelection = resolveArtifactSelectionForAssertions({
+    artifactDetails,
+    initialSources: [submitResponse.data, artifactSelectionResponse],
+    finalSources: [plannerOutputResponse, submitResponse.data, artifactSelectionResponse],
+    primaryArtifactSources: [plannerOutputResponse, submitResponse.data, artifactSelectionResponse],
+    dependentArtifactSources: [plannerOutputResponse, submitResponse.data, artifactSelectionResponse],
+    selectedArtifactsFromDetails,
+  });
 
   const missing: string[] = [];
-  if (!selectedArtifacts || selectedArtifacts.length === 0) {
+  if (!artifactSelection.finalSelectedArtifacts || artifactSelection.finalSelectedArtifacts.length === 0) {
     missing.push("selectedArtifacts");
   }
-  if (!primaryArtifact) {
+  if (!artifactSelection.primaryArtifact) {
     missing.push("primaryArtifact");
   }
   if (!plannerPlan) {
@@ -376,7 +352,7 @@ async function submitDevelopmentRequestViaRest(
   if (!siblingUrl) {
     missing.push("siblingUrl");
   }
-  if (!dependentArtifacts) {
+  if (!artifactSelection.dependentArtifacts) {
     missing.push("dependentArtifacts");
   }
 
@@ -386,9 +362,9 @@ async function submitDevelopmentRequestViaRest(
     );
   }
 
-  const requiredSelectedArtifacts = selectedArtifacts as string[];
-  const requiredPrimaryArtifact = primaryArtifact as string;
-  const requiredDependentArtifacts = dependentArtifacts as string[];
+  const requiredSelectedArtifacts = artifactSelection.finalSelectedArtifacts as string[];
+  const requiredPrimaryArtifact = artifactSelection.primaryArtifact as string;
+  const requiredDependentArtifacts = artifactSelection.dependentArtifacts as string[];
   const requiredPlannerPlan = plannerPlan as unknown;
   const requiredSiblingId = siblingId as string;
   const requiredSiblingUrl = siblingUrl as string;
@@ -397,6 +373,8 @@ async function submitDevelopmentRequestViaRest(
   return {
     requestText: scenario.request,
     selectedArtifacts: requiredSelectedArtifacts,
+    initialSuggestedArtifacts: artifactSelection.initialSuggestedArtifacts,
+    finalSelectedArtifacts: artifactSelection.finalSelectedArtifacts,
     primaryArtifact: requiredPrimaryArtifact,
     dependentArtifacts: requiredDependentArtifacts,
     artifactDetails,
@@ -418,203 +396,197 @@ async function submitDevelopmentRequestViaMcpProtocol(
   scenario: ScenarioDefinition,
 ): Promise<DevelopmentRequestResult> {
   const token = await config.authTokenProvider();
-  const maxAttempts = 3;
-  let init: McpSessionInitResult | null = null;
-  let listApplications: Record<string, unknown> | null = null;
   let lastError: unknown = null;
-
+  const maxAttempts = 4;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
-      init = await initializeMcpSession(config, token);
-      listApplications = await callMcpTool(config, token, init.sessionId, "list_applications", {});
-      break;
+      const init = await initializeMcpSession(config, token);
+      const listApplications = await callMcpTool(config, token, init.sessionId, "list_applications", {});
+      const applicationId = extractFirstString(listApplications, [["response", "applications", "0", "id"]]);
+      if (!applicationId) {
+        throw new Error(`MCP tools/list_applications did not return an application id; raw=${safeStringify(listApplications)}`);
+      }
+
+      const createSession = await callMcpTool(config, token, init.sessionId, "create_application_change_session", {
+        application_id: applicationId,
+        payload: {
+          request_text: scenario.request,
+          metadata: buildScenarioPlannerMetadata(scenario),
+        },
+      });
+
+      const sessionId =
+        extractFirstString(createSession, [["response", "raw", "session", "id"]]) ??
+        extractFirstString(createSession, [["response", "session_id"]]);
+      if (!sessionId) {
+        throw new Error(
+          `MCP create_application_change_session succeeded but session id is missing; raw=${safeStringify(createSession)}`,
+        );
+      }
+
+      const sessionPlan = await callMcpTool(config, token, init.sessionId, "get_application_change_session_plan", {
+        application_id: applicationId,
+        session_id: sessionId,
+      });
+
+      let previewPrep: unknown = null;
+      let previewStatus: unknown = null;
+      try {
+        previewPrep = await callMcpTool(config, token, init.sessionId, "prepare_preview_application_change_session", {
+          application_id: applicationId,
+          session_id: sessionId,
+        });
+      } catch (error: unknown) {
+        previewPrep = {
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+
+      try {
+        previewStatus = await callMcpTool(config, token, init.sessionId, "get_application_change_session_preview_status", {
+          application_id: applicationId,
+          session_id: sessionId,
+        });
+      } catch (error: unknown) {
+        previewStatus = {
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+
+      const rawResponses: MutableRawResponses = {
+        submitRequest: {
+          mcpInitialize: init.responseBody,
+          listApplications,
+          createSession,
+          previewPrep,
+        },
+        artifactSelection: createSession,
+        plannerOutput: sessionPlan,
+        siblingInfo: previewStatus,
+        siblingUrl: previewStatus,
+        branchInfo: previewStatus,
+      };
+
+      const artifactDetails = extractArtifactDetails(createSession) ?? [];
+      const selectedArtifactsFromDetails = artifactDetails.length > 0 ? artifactDetails.map((detail) => detail.artifact) : undefined;
+      const plannerPlan =
+        resolvePlannerPlan({
+          submitResponse: createSession,
+          plannerOutputResponse: sessionPlan,
+          fallbackSources: [sessionPlan, createSession],
+        });
+      const artifactSelection = resolveArtifactSelectionForAssertions({
+        artifactDetails,
+        initialSources: [createSession],
+        finalSources: [sessionPlan, createSession],
+        primaryArtifactSources: [sessionPlan, createSession],
+        dependentArtifactSources: [sessionPlan, createSession],
+        selectedArtifactsFromDetails,
+      });
+
+      const siblingId = sessionId;
+      const siblingUrl =
+        extractFirstString(previewStatus, [
+          ["response", "preview", "primary_url"],
+          ["response", "preview_urls", "0"],
+          ["response", "raw", "control", "preview_target", "primary_url"],
+        ]) ??
+        extractFirstString(createSession, [["base_url"]]);
+
+      const branchName =
+        extractFirstString(previewStatus, [
+          ["response", "raw", "control", "root_target_identity", "branch"],
+          ["response", "raw", "control", "root_target_identity", "branch_name"],
+          ["response", "raw", "control", "session", "metadata", "branch_name"],
+          ["response", "raw", "control", "session", "metadata", "branch"],
+          ["response", "raw", "control", "session", "branch_name"],
+          ["response", "raw", "control", "session", "branch"],
+          ["response", "raw", "branch_name"],
+          ["response", "raw", "branch"],
+          ["response", "branch_name"],
+          ["response", "branch"],
+        ]) ??
+        extractFirstString(createSession, [
+          ["response", "branch_name"],
+          ["response", "branch"],
+          ["response", "raw", "session", "branch_name"],
+          ["response", "raw", "session", "branch"],
+        ]) ??
+        null;
+
+      if (scenario.deployment.require_branch_isolation && !branchName) {
+        throw new Error(
+          `missing-backend-field: branchName is required for branch-isolated scenario '${scenario.id}' but was not present in MCP sibling/control payloads; rawResponses=${safeStringify(rawResponses)}`,
+        );
+      }
+
+      const missing: string[] = [];
+      if (!artifactSelection.finalSelectedArtifacts || artifactSelection.finalSelectedArtifacts.length === 0) {
+        missing.push("selectedArtifacts");
+      }
+      if (!artifactSelection.primaryArtifact) {
+        missing.push("primaryArtifact");
+      }
+      if (!plannerPlan) {
+        missing.push("plannerPlan");
+      }
+      if (!siblingId) {
+        missing.push("siblingId");
+      }
+      if (!siblingUrl) {
+        missing.push("siblingUrl");
+      }
+      if (!artifactSelection.dependentArtifacts) {
+        missing.push("dependentArtifacts");
+      }
+
+      if (missing.length > 0) {
+        throw new Error(
+          `Missing required MCP protocol fields: ${missing.join(", ")}; rawResponses=${safeStringify(rawResponses)}`,
+        );
+      }
+
+      const requiredSelectedArtifacts = artifactSelection.finalSelectedArtifacts as string[];
+      const requiredDependentArtifacts = artifactSelection.dependentArtifacts as string[];
+      const requiredSiblingUrl = siblingUrl as string;
+
+      return {
+        requestText: scenario.request,
+        selectedArtifacts: requiredSelectedArtifacts,
+        initialSuggestedArtifacts: artifactSelection.initialSuggestedArtifacts,
+        finalSelectedArtifacts: artifactSelection.finalSelectedArtifacts,
+        primaryArtifact: artifactSelection.primaryArtifact,
+        dependentArtifacts: requiredDependentArtifacts,
+        artifactDetails,
+        plannerPlan,
+        siblingId,
+        siblingUrl: requiredSiblingUrl,
+        branchName,
+        rawResponses,
+      };
     } catch (error: unknown) {
       lastError = error;
-      if (!isRetriableToolSurfaceError(error) || attempt === maxAttempts) {
+      if (attempt === maxAttempts || !isRetriableMcpTransportError(error)) {
         throw error;
       }
       await sleep(500 * attempt);
     }
   }
 
-  if (!init || !listApplications) {
-    throw new Error(
-      `Failed to initialize MCP session/list_applications after retries: ${
-        lastError instanceof Error ? lastError.message : String(lastError)
-      }`,
-    );
+  throw new Error(
+    `MCP protocol request failed after retries: ${lastError instanceof Error ? lastError.message : String(lastError)}`,
+  );
+}
+
+function buildScenarioPlannerMetadata(scenario: ScenarioDefinition): Record<string, unknown> {
+  const metadata: Record<string, unknown> = {};
+  if (scenario.hard_required_artifacts.length > 0) {
+    metadata.required_artifacts = scenario.hard_required_artifacts;
   }
-
-  const applicationId = extractFirstString(listApplications, [["response", "applications", "0", "id"]]);
-
-  if (!applicationId) {
-    throw new Error(`MCP tools/list_applications did not return an application id; raw=${safeStringify(listApplications)}`);
+  if (scenario.hard_forbidden_artifacts.length > 0) {
+    metadata.forbidden_artifacts = scenario.hard_forbidden_artifacts;
   }
-
-  const createSession = await callMcpTool(config, token, init.sessionId, "create_application_change_session", {
-    application_id: applicationId,
-    payload: {
-      request_text: scenario.request,
-    },
-  });
-
-  const sessionId =
-    extractFirstString(createSession, [["response", "raw", "session", "id"]]) ??
-    extractFirstString(createSession, [["response", "session_id"]]);
-
-  if (!sessionId) {
-    throw new Error(
-      `MCP create_application_change_session succeeded but session id is missing; raw=${safeStringify(createSession)}`,
-    );
-  }
-
-  const sessionPlan = await callMcpTool(config, token, init.sessionId, "get_application_change_session_plan", {
-    application_id: applicationId,
-    session_id: sessionId,
-  });
-
-  let previewPrep: unknown = null;
-  let previewStatus: unknown = null;
-  try {
-    previewPrep = await callMcpTool(config, token, init.sessionId, "prepare_preview_application_change_session", {
-      application_id: applicationId,
-      session_id: sessionId,
-    });
-  } catch (error: unknown) {
-    previewPrep = {
-      error: error instanceof Error ? error.message : String(error),
-    };
-  }
-
-  try {
-    previewStatus = await callMcpTool(config, token, init.sessionId, "get_application_change_session_preview_status", {
-      application_id: applicationId,
-      session_id: sessionId,
-    });
-  } catch (error: unknown) {
-    previewStatus = {
-      error: error instanceof Error ? error.message : String(error),
-    };
-  }
-
-  const rawResponses: MutableRawResponses = {
-    submitRequest: {
-      mcpInitialize: init.responseBody,
-      listApplications,
-      createSession,
-      previewPrep,
-    },
-    artifactSelection: createSession,
-    plannerOutput: sessionPlan,
-    siblingInfo: previewStatus,
-    siblingUrl: previewStatus,
-    branchInfo: previewStatus,
-  };
-
-  const selectedArtifacts =
-    extractArtifactTitles(createSession) ??
-    extractFirstStringArray(createSession, [
-      ["response", "selected_artifacts"],
-      ["response", "selected_artifact_ids"],
-      ["response", "change_session_handle", "artifact_scope"],
-    ]);
-
-  const primaryArtifact =
-    extractFirstString(createSession, [
-      ["response", "raw", "session", "selected_artifacts", "0", "artifact_title"],
-      ["response", "raw", "session", "analysis", "impacted_artifacts", "0", "artifact_title"],
-      ["response", "primary_artifact_id"],
-    ]) ?? "";
-
-  const dependentArtifacts =
-    extractFirstStringArray(createSession, [
-      ["response", "raw", "session", "dependent_artifact_ids"],
-      ["response", "dependent_artifact_ids"],
-    ]) ??
-    (selectedArtifacts && primaryArtifact
-      ? selectedArtifacts.filter((artifact) => artifact !== primaryArtifact)
-      : undefined);
-
-  const artifactDetails = extractArtifactDetails(createSession) ?? [];
-
-  const plannerPlan =
-    resolvePlannerPlan({
-      submitResponse: createSession,
-      plannerOutputResponse: sessionPlan,
-      fallbackSources: [sessionPlan, createSession],
-    });
-
-  const siblingId = sessionId;
-  const siblingUrl =
-    extractFirstString(previewStatus, [
-      ["response", "preview", "primary_url"],
-      ["response", "preview_urls", "0"],
-      ["response", "raw", "control", "preview_target", "primary_url"],
-    ]) ??
-    extractFirstString(createSession, [["base_url"]]);
-
-  const branchName =
-    extractFirstString(previewStatus, [
-      ["response", "raw", "control", "root_target_identity", "branch"],
-      ["response", "raw", "control", "root_target_identity", "branch_name"],
-      ["response", "raw", "control", "session", "metadata", "branch_name"],
-      ["response", "raw", "control", "session", "metadata", "branch"],
-      ["response", "raw", "control", "session", "branch_name"],
-      ["response", "raw", "control", "session", "branch"],
-      ["response", "raw", "branch_name"],
-      ["response", "raw", "branch"],
-      ["response", "branch_name"],
-      ["response", "branch"],
-    ]) ?? null;
-
-  if (scenario.deployment.require_branch_isolation && !branchName) {
-    throw new Error(
-      `missing-backend-field: branchName is required for branch-isolated scenario '${scenario.id}' but was not present in MCP sibling/control payloads; rawResponses=${safeStringify(rawResponses)}`,
-    );
-  }
-
-  const missing: string[] = [];
-  if (!selectedArtifacts || selectedArtifacts.length === 0) {
-    missing.push("selectedArtifacts");
-  }
-  if (!primaryArtifact) {
-    missing.push("primaryArtifact");
-  }
-  if (!plannerPlan) {
-    missing.push("plannerPlan");
-  }
-  if (!siblingId) {
-    missing.push("siblingId");
-  }
-  if (!siblingUrl) {
-    missing.push("siblingUrl");
-  }
-  if (!dependentArtifacts) {
-    missing.push("dependentArtifacts");
-  }
-
-  if (missing.length > 0) {
-    throw new Error(
-      `Missing required MCP protocol fields: ${missing.join(", ")}; rawResponses=${safeStringify(rawResponses)}`,
-    );
-  }
-
-  const requiredSelectedArtifacts = selectedArtifacts as string[];
-  const requiredDependentArtifacts = dependentArtifacts as string[];
-  const requiredSiblingUrl = siblingUrl as string;
-
-  return {
-    requestText: scenario.request,
-    selectedArtifacts: requiredSelectedArtifacts,
-    primaryArtifact,
-    dependentArtifacts: requiredDependentArtifacts,
-    artifactDetails,
-    plannerPlan,
-    siblingId,
-    siblingUrl: requiredSiblingUrl,
-    branchName,
-    rawResponses,
-  };
+  return metadata;
 }
 
 function isRetriableToolSurfaceError(error: unknown): boolean {
@@ -628,6 +600,27 @@ function isRetriableToolSurfaceError(error: unknown): boolean {
 
   const bodyText = safeStringify(error.errorBody).toLowerCase();
   return bodyText.includes("empty_tool_surface");
+}
+
+function isRetriableMcpTransportError(error: unknown): boolean {
+  if (isRetriableToolSurfaceError(error)) {
+    return true;
+  }
+  if (error instanceof McpHttpError) {
+    if ([404, 408, 425, 429, 500, 502, 503, 504].includes(error.status)) {
+      return true;
+    }
+    const bodyText = safeStringify(error.errorBody).toLowerCase();
+    return bodyText.includes("temporarily unavailable") || bodyText.includes("timeout");
+  }
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  return (
+    message.includes("network") ||
+    message.includes("fetch failed") ||
+    message.includes("econnreset") ||
+    message.includes("timed out") ||
+    message.includes("timeout")
+  );
 }
 
 function sleep(ms: number): Promise<void> {
@@ -919,6 +912,86 @@ function extractPlannerTurnText(sources: unknown[]): string | null {
   return null;
 }
 
+export function resolveArtifactSelectionForAssertions(args: {
+  initialSources: readonly unknown[];
+  finalSources: readonly unknown[];
+  primaryArtifactSources: readonly unknown[];
+  dependentArtifactSources: readonly unknown[];
+  artifactDetails: readonly ArtifactSelectionDetail[];
+  selectedArtifactsFromDetails?: readonly string[];
+}): ArtifactSelectionResolution {
+  const artifactIdToLabel = buildArtifactIdToLabelMap([...args.initialSources, ...args.finalSources]);
+  const initialSuggestedArtifacts =
+    extractArtifactTitlesFromSources(args.initialSources) ??
+    extractFirstStringArrayFromSources(args.initialSources, [
+      ["response", "selected_artifacts"],
+      ["response", "change_session_handle", "artifact_scope"],
+      ["selectedArtifacts"],
+      ["selected_artifacts"],
+      ["artifactSelection", "selectedArtifacts"],
+      ["artifacts", "selected"],
+    ]) ??
+    (args.selectedArtifactsFromDetails && args.selectedArtifactsFromDetails.length > 0
+      ? dedupeStrings([...args.selectedArtifactsFromDetails])
+      : []);
+
+  const finalFromTitles = extractArtifactTitlesFromSources(args.finalSources);
+  const finalFromIdsRaw =
+    extractFirstStringArrayFromSources(args.finalSources, [
+      ["response", "raw", "session", "selected_artifact_ids"],
+      ["response", "selected_artifact_ids"],
+      ["selected_artifact_ids"],
+      ["response", "selected_artifacts"],
+      ["selectedArtifacts"],
+      ["selected_artifacts"],
+    ]) ?? [];
+  const finalFromIds =
+    finalFromIdsRaw.length > 0 ? dedupeStrings(finalFromIdsRaw.map((value) => artifactIdToLabel.get(value) ?? value)) : [];
+  const finalSelectedArtifacts =
+    (finalFromIds.length > 0
+        ? dedupeStrings(finalFromIds)
+        : finalFromTitles && finalFromTitles.length > 0
+          ? dedupeStrings(finalFromTitles)
+        : dedupeStrings(initialSuggestedArtifacts));
+
+  const primaryArtifactRaw =
+    extractFirstStringFromSources(args.primaryArtifactSources, [
+      ["response", "raw", "session", "primary_artifact_id"],
+      ["response", "primary_artifact_id"],
+      ["primary_artifact_id"],
+      ["response", "raw", "session", "selected_artifacts", "0", "artifact_title"],
+      ["response", "raw", "session", "analysis", "impacted_artifacts", "0", "artifact_title"],
+      ["primaryArtifact"],
+      ["primary_artifact"],
+      ["artifactSelection", "primaryArtifact"],
+      ["artifacts", "primary"],
+    ]) ?? "";
+  const primaryArtifact =
+    (artifactIdToLabel.get(primaryArtifactRaw) ?? primaryArtifactRaw) || finalSelectedArtifacts[0] || "";
+
+  const dependentFromRaw =
+    extractFirstStringArrayFromSources(args.dependentArtifactSources, [
+      ["response", "raw", "session", "dependent_artifact_ids"],
+      ["response", "dependent_artifact_ids"],
+      ["dependent_artifact_ids"],
+      ["dependentArtifacts"],
+      ["dependent_artifacts"],
+      ["artifacts", "dependent"],
+    ]) ?? [];
+  const dependentFromMapped = dedupeStrings(dependentFromRaw.map((value) => artifactIdToLabel.get(value) ?? value));
+  const dependentArtifacts =
+    dependentFromMapped.length > 0
+      ? dependentFromMapped
+      : finalSelectedArtifacts.filter((artifact) => artifact !== primaryArtifact);
+
+  return {
+    initialSuggestedArtifacts,
+    finalSelectedArtifacts,
+    primaryArtifact,
+    dependentArtifacts,
+  };
+}
+
 export function buildHttpMcpClient(config: McpDevelopmentConfig): McpClient {
   return new HttpMcpClient(config);
 }
@@ -1015,6 +1088,92 @@ function extractArtifactDetails(value: unknown): ArtifactSelectionDetail[] | und
   }
 
   return undefined;
+}
+
+function extractArtifactTitlesFromSources(sources: readonly unknown[]): string[] | undefined {
+  for (const source of sources) {
+    const titles = extractArtifactTitles(source);
+    if (titles && titles.length > 0) {
+      return dedupeStrings(titles);
+    }
+  }
+  return undefined;
+}
+
+function extractFirstStringArrayFromSources(
+  sources: readonly unknown[],
+  paths: readonly (readonly string[])[],
+): string[] | undefined {
+  for (const source of sources) {
+    const values = extractFirstStringArray(source, paths);
+    if (values && values.length > 0) {
+      return dedupeStrings(values);
+    }
+  }
+  return undefined;
+}
+
+function extractFirstStringFromSources(
+  sources: readonly unknown[],
+  paths: readonly (readonly string[])[],
+): string | undefined {
+  for (const source of sources) {
+    const value = extractFirstString(source, paths);
+    if (value && value.length > 0) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function buildArtifactIdToLabelMap(sources: readonly unknown[]): Map<string, string> {
+  const map = new Map<string, string>();
+  const candidatePaths = [
+    ["response", "raw", "session", "selected_artifacts"],
+    ["response", "selected_artifacts"],
+    ["selected_artifacts"],
+    ["response", "raw", "session", "analysis", "impacted_artifacts"],
+    ["response", "analysis", "impacted_artifacts"],
+    ["analysis", "impacted_artifacts"],
+  ] as const;
+  for (const source of sources) {
+    for (const path of candidatePaths) {
+      const rows = getByPath(source, path);
+      if (!Array.isArray(rows)) {
+        continue;
+      }
+      for (const row of rows) {
+        if (typeof row !== "object" || row === null) {
+          continue;
+        }
+        const record = row as Record<string, unknown>;
+        const id = asNonEmptyString(record.artifact_id) ?? asNonEmptyString(record.artifactId);
+        const label =
+          asNonEmptyString(record.artifact_title) ??
+          asNonEmptyString(record.artifact_slug) ??
+          asNonEmptyString(record.artifact) ??
+          asNonEmptyString(record.name);
+        if (id && label && !map.has(id)) {
+          map.set(id, label);
+        }
+      }
+    }
+  }
+  return map;
+}
+
+function dedupeStrings(values: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  for (const value of values) {
+    const token = String(value ?? "").trim();
+    if (!token || seen.has(token)) {
+      continue;
+    }
+    seen.add(token);
+    normalized.push(token);
+  }
+  return normalized;
 }
 
 function normalizeArtifactDetail(value: unknown): ArtifactSelectionDetail | null {

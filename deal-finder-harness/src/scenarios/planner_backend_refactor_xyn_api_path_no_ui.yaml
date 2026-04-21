@@ -1,0 +1,37 @@
+id: planner-backend-refactor-xyn-api-path-no-ui
+suite: planner-regression
+title: "Planner Regression: backend refactor with explicit path and no UI constraints"
+request: >
+  STRICT REFACTOR: Decompose services/xyn-api/backend/xyn_orchestrator/xyn_api.py into smaller backend modules with delegation wrappers.
+  Preserve behavior and contracts. DO NOT modify UI, styling, layout, Workbench surfaces, or command palette text.
+expected_artifacts:
+  - xyn-api
+expected_primary_artifact: xyn-api
+optional_artifacts:
+  - deal-finder-harness
+forbidden_artifacts:
+  - xyn-ui
+hard_forbidden_artifacts:
+  - xyn-ui
+hard_required_artifacts:
+  - xyn-api
+accepted_dependency_reasons:
+  - owned_source_scope_path_match
+  - role_signal_alignment
+planner_expectations:
+  should_use_mcp: true
+  should_update_command_palette: false
+  may_require_core_xyn_changes: false
+  success_criteria:
+    - Planner anchors on backend refactor scope for xyn_api.py.
+    - Planner avoids UI/layout/styling implementation work.
+  required_phrases:
+    - xyn_api.py
+    - backend
+  forbidden_phrases:
+    - command palette wording
+    - css
+deployment:
+  mode: preview
+  requires_xyn_api: true
+  require_branch_isolation: true

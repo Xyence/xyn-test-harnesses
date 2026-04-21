@@ -1,7 +1,7 @@
 import path from "node:path";
 import { readdir, readFile } from "node:fs/promises";
 import { parse } from "yaml";
-import { ScenarioSchema, type ScenarioDefinition } from "./types";
+import { ScenarioSchema, type ScenarioDefinition, type ScenarioSuite } from "./types";
 
 const SCENARIO_DIR = path.resolve(process.cwd(), "src/scenarios");
 
@@ -35,8 +35,25 @@ export async function discoverScenarios(): Promise<ScenarioDefinition[]> {
       throw new Error(`Scenario schema validation failure '${fileName}': ${details}`);
     }
 
-    scenarios.push(parsedScenario.data);
+    scenarios.push({
+      ...parsedScenario.data,
+      suite: parsedScenario.data.suite ?? inferScenarioSuite(parsedScenario.data.id),
+    });
   }
 
   return scenarios;
+}
+
+function inferScenarioSuite(scenarioId: string): ScenarioSuite {
+  const id = String(scenarioId || "").trim();
+  const dealFinderMcpScenarioIds = new Set([
+    "mcp_create_campaign",
+    "mcp_add_update_datasource",
+    "mcp_create_update_notification_rule",
+    "phase1_datasource_crud_flow",
+  ]);
+  if (dealFinderMcpScenarioIds.has(id)) {
+    return "deal-finder-mcp";
+  }
+  return "planner-regression";
 }

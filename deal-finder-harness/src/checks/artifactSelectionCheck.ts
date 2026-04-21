@@ -3,6 +3,8 @@ import type { ScenarioDefinition } from "../scenarios/types";
 
 export interface ArtifactSelectionObserved {
   readonly selectedArtifacts: readonly string[];
+  readonly initialSuggestedArtifacts: readonly string[];
+  readonly finalSelectedArtifacts: readonly string[];
   readonly requiredArtifacts: readonly string[];
   readonly forbiddenArtifacts: readonly string[];
   readonly optionalArtifacts: readonly string[];
@@ -27,7 +29,8 @@ export function runArtifactSelectionCheck(
   scenario: ScenarioDefinition,
   developmentResult: DevelopmentRequestResult,
 ): ArtifactSelectionCheckResult {
-  const selectedSet = new Set(developmentResult.selectedArtifacts);
+  const selectedArtifacts = developmentResult.finalSelectedArtifacts;
+  const selectedSet = new Set(selectedArtifacts);
   const requiredArtifacts = scenario.expected_artifacts;
   const optionalArtifacts = scenario.optional_artifacts;
   const forbiddenArtifacts = scenario.forbidden_artifacts;
@@ -37,7 +40,7 @@ export function runArtifactSelectionCheck(
   const presentForbiddenArtifacts = forbiddenArtifacts.filter((artifact) => selectedSet.has(artifact));
 
   const toleratedArtifacts = new Set([...requiredArtifacts, ...optionalArtifacts]);
-  const unexpectedArtifacts = developmentResult.selectedArtifacts.filter(
+  const unexpectedArtifacts = selectedArtifacts.filter(
     (artifact) => !toleratedArtifacts.has(artifact),
   );
 
@@ -107,6 +110,8 @@ export function runArtifactSelectionCheck(
     details,
     observed: {
       selectedArtifacts: developmentResult.selectedArtifacts,
+      initialSuggestedArtifacts: developmentResult.initialSuggestedArtifacts,
+      finalSelectedArtifacts: developmentResult.finalSelectedArtifacts,
       requiredArtifacts,
       forbiddenArtifacts,
       optionalArtifacts,

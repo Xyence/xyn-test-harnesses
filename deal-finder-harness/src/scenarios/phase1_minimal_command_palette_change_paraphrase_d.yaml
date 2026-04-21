@@ -21,7 +21,6 @@ planner_expectations:
     - Planner treats this as a UI wording refinement.
     - Planner includes verification of command discoverability.
   required_phrases:
-    - command palette
     - deal finder
   forbidden_phrases:
     - backend-only

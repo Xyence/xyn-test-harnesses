@@ -34,6 +34,7 @@ const RawEnvSchema = z
     MCP_ENDPOINT_BRANCH_INFO: z.string().min(1).optional(),
     ARTIFACTS_DIR: z.string().default("./artifacts"),
     HARNESS_SCENARIO_ID: z.string().min(1).default("mcp_create_campaign"),
+    HARNESS_SCENARIO_SUITE: z.enum(["all", "planner-regression", "deal-finder-mcp"]).default("all"),
   })
   .superRefine((value, ctx) => {
     if (!value.DEAL_FINDER_MCP_BASE_URL && !value.MCP_BASE_URL) {

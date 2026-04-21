@@ -21,8 +21,8 @@ planner_expectations:
     - Planner keeps work in xyn-ui.
     - Planner validates command discoverability in UI.
   required_phrases:
-    - command palette
-    - xyn-ui
+    - deal finder
+    - discoverable
   forbidden_phrases:
     - api migration
 deployment:

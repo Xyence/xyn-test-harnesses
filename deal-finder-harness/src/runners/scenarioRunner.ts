@@ -20,6 +20,7 @@ import type { ScenarioDefinition } from "../scenarios/types";
 
 export interface ScenarioRunResult {
   readonly scenarioId: string;
+  readonly suite: string;
   readonly title: string;
   readonly passed: boolean;
   readonly startedAtIso: string;
@@ -71,6 +72,16 @@ export interface HarnessRunReport {
     readonly entityAssertionMismatches: number;
     readonly artifactSelectionDifferenceViolations: number;
     readonly cannedPlanViolations: number;
+    readonly suiteSummaries: readonly {
+      suite: string;
+      totalScenarios: number;
+      passedScenarios: number;
+      failedScenarios: number;
+      blockedScenarios: number;
+      artifactMismatches: number;
+      plannerMismatches: number;
+      entityAssertionMismatches: number;
+    }[];
   };
   readonly artifactSelectionDifferenceViolations: readonly ArtifactSelectionDifferenceViolation[];
   readonly cannedPlanViolations: readonly CannedPlanViolation[];
@@ -89,6 +100,8 @@ const MISSING_DEVELOPMENT_RESULT_ARTIFACT_CHECK: ArtifactSelectionCheckResult = 
   details: ["MCP development result is missing; cannot validate artifact selection"],
   observed: {
     selectedArtifacts: [],
+    initialSuggestedArtifacts: [],
+    finalSelectedArtifacts: [],
     requiredArtifacts: [],
     forbiddenArtifacts: [],
     optionalArtifacts: [],
@@ -182,6 +195,7 @@ export class ScenarioRunner {
 
         scenarioResults.push({
           scenarioId: scenario.id,
+          suite: scenario.suite ?? "planner-regression",
           title: scenario.title,
           passed: false,
           startedAtIso,
@@ -211,6 +225,7 @@ export class ScenarioRunner {
 
         scenarioResults.push({
           scenarioId: scenario.id,
+          suite: scenario.suite ?? "planner-regression",
           title: scenario.title,
           passed: false,
           startedAtIso,
@@ -234,6 +249,8 @@ export class ScenarioRunner {
 
       console.log("MCP planning succeeded", {
         scenarioId: scenario.id,
+        initialSuggestedArtifacts: mcpResult.developmentResult.initialSuggestedArtifacts,
+        finalSelectedArtifacts: mcpResult.developmentResult.finalSelectedArtifacts,
         selectedArtifacts: mcpResult.developmentResult.selectedArtifacts,
         primaryArtifact: mcpResult.developmentResult.primaryArtifact,
         siblingId: mcpResult.developmentResult.siblingId,
@@ -280,6 +297,7 @@ export class ScenarioRunner {
 
       scenarioResults.push({
         scenarioId: scenario.id,
+        suite: scenario.suite ?? "planner-regression",
         title: scenario.title,
         passed: scenarioPassed,
         startedAtIso,
@@ -329,6 +347,7 @@ export class ScenarioRunner {
     const entityAssertionMismatches = resultsWithCannedEnforcement.filter(
       (result) => result.failureCategory === "entity_assertion_failure",
     ).length;
+    const suiteSummaries = computeSuiteSummaries(resultsWithCannedEnforcement);
 
     return {
       generatedAtIso: new Date().toISOString(),
@@ -342,6 +361,7 @@ export class ScenarioRunner {
         entityAssertionMismatches,
         artifactSelectionDifferenceViolations: differenceViolations.length,
         cannedPlanViolations: cannedPlanViolations.length,
+        suiteSummaries,
       },
       artifactSelectionDifferenceViolations: differenceViolations,
       cannedPlanViolations,
@@ -530,4 +550,44 @@ function classifyFailureCategory(args: {
   }
 
   return "entity_assertion_failure";
+}
+
+function computeSuiteSummaries(results: readonly ScenarioRunResult[]): {
+  suite: string;
+  totalScenarios: number;
+  passedScenarios: number;
+  failedScenarios: number;
+  blockedScenarios: number;
+  artifactMismatches: number;
+  plannerMismatches: number;
+  entityAssertionMismatches: number;
+}[] {
+  const grouped = new Map<string, ScenarioRunResult[]>();
+  for (const result of results) {
+    const suite = String(result.suite || "planner-regression");
+    const rows = grouped.get(suite) ?? [];
+    rows.push(result);
+    grouped.set(suite, rows);
+  }
+  return [...grouped.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([suite, rows]) => {
+      const passedScenarios = rows.filter((result) => result.passed).length;
+      const blockedScenarios = rows.filter((result) => result.blockedReason !== null).length;
+      const artifactMismatches = rows.filter((result) => result.failureCategory === "artifact_mismatch").length;
+      const plannerMismatches = rows.filter((result) => result.failureCategory === "planner_mismatch").length;
+      const entityAssertionMismatches = rows.filter(
+        (result) => result.failureCategory === "entity_assertion_failure",
+      ).length;
+      return {
+        suite,
+        totalScenarios: rows.length,
+        passedScenarios,
+        failedScenarios: rows.length - passedScenarios,
+        blockedScenarios,
+        artifactMismatches,
+        plannerMismatches,
+        entityAssertionMismatches,
+      };
+    });
 }
