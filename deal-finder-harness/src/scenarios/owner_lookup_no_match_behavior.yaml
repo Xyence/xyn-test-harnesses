@@ -1,0 +1,30 @@
+id: owner_lookup_no_match_behavior
+suite: deal-finder-owner-lookup
+title: "Owner Lookup: No-Match Behavior"
+request: >
+  Resolve parcel identity for a non-existent address and return a clean no-match response.
+expected_artifacts:
+  - xyn-ui
+expected_primary_artifact: xyn-ui
+optional_artifacts:
+  - xyn-api
+forbidden_artifacts: []
+accepted_dependency_reasons:
+  - ui_command_requires_api_route_registration
+planner_expectations:
+  should_use_mcp: true
+  may_require_core_xyn_changes: false
+  success_criteria:
+    - Unknown address returns no-match without server error.
+  required_phrases: []
+  forbidden_phrases: []
+deployment:
+  mode: preview
+  requires_xyn_api: true
+  require_branch_isolation: false
+assertions:
+  expected_operations:
+    - owner_lookup_no_match_processed
+  expected_response_fields:
+    - path: submitRequest.endpointTarget.submitEndpoint
+      contains: "/mcp"

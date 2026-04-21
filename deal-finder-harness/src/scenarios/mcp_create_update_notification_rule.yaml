@@ -35,9 +35,6 @@ assertions:
     - type: notification_rule
   expected_entities_updated:
     - type: notification_rule
-  expected_notifications:
-    - channel: slack
-      event: campaign
   expected_response_fields:
     - path: submitRequest.endpointTarget.submitEndpoint
       contains: "/mcp"

@@ -1,0 +1,34 @@
+id: ingest_ops_invalid_source_status_rejected
+suite: deal-finder-ingest-ops
+title: "Deal Finder Ingest Ops: Invalid Source Rejected"
+request: >
+  Verify ingestion status/read operations reject an invalid source id cleanly.
+expected_artifacts:
+  - xyn-ui
+expected_primary_artifact: xyn-ui
+optional_artifacts:
+  - xyn-api
+forbidden_artifacts: []
+accepted_dependency_reasons:
+  - ui_command_requires_api_route_registration
+planner_expectations:
+  should_use_mcp: true
+  may_require_core_xyn_changes: false
+  success_criteria:
+    - Invalid source id is rejected by ingest status calls.
+  required_phrases: []
+  forbidden_phrases: []
+deployment:
+  mode: preview
+  requires_xyn_api: true
+  require_branch_isolation: false
+ingestion_smoke:
+  fixture_ids:
+    - current_parcels_shapefile
+  require_quality_summary: false
+assertions:
+  expected_operations:
+    - ingest_status_unavailable
+  expected_response_fields:
+    - path: submitRequest.endpointTarget.submitEndpoint
+      contains: "/mcp"

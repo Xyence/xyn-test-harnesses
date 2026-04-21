@@ -1,0 +1,37 @@
+id: campaign_notification_association_remove_attached_rule
+suite: deal-finder-campaign-notification-association
+title: "Campaign Notification Association: Remove Attached Rule"
+request: >
+  Remove an attached notification rule from a campaign and verify list output updates.
+expected_artifacts:
+  - xyn-ui
+expected_primary_artifact: xyn-ui
+optional_artifacts:
+  - xyn-api
+forbidden_artifacts: []
+accepted_dependency_reasons:
+  - ui_command_requires_api_route_registration
+planner_expectations:
+  should_use_mcp: true
+  may_require_core_xyn_changes: false
+  success_criteria:
+    - An attached notification rule can be detached from a campaign.
+  required_phrases: []
+  forbidden_phrases: []
+deployment:
+  mode: preview
+  requires_xyn_api: true
+  require_branch_isolation: false
+assertions:
+  expected_operations:
+    - campaign_create
+    - notification_rule_create
+    - campaign_notification_attach
+    - campaign_notification_remove
+    - campaign_notification_list_after_remove
+  expected_entities_created:
+    - type: campaign
+    - type: notification_rule
+  expected_response_fields:
+    - path: submitRequest.endpointTarget.submitEndpoint
+      contains: "/mcp"

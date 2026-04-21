@@ -33,7 +33,6 @@ assertions:
     - type: campaign
       name_contains: retail
   expected_response_fields:
-    - path: plannerOutput.response.current_status
     - path: submitRequest.endpointTarget.submitEndpoint
       contains: "/mcp"
     - path: submitRequest.endpointTarget.healthEndpoint

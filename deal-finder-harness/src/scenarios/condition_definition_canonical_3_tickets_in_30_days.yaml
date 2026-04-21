@@ -1,0 +1,32 @@
+id: condition_definition_canonical_3_tickets_in_30_days
+suite: deal-finder-condition-definitions
+title: "Condition Definitions: Canonical 3 Tickets In 30 Days"
+request: >
+  Create a canonical temporal distress condition for 3 CSB tickets in 30 days.
+expected_artifacts:
+  - xyn-ui
+expected_primary_artifact: xyn-ui
+optional_artifacts:
+  - xyn-api
+forbidden_artifacts: []
+accepted_dependency_reasons:
+  - ui_command_requires_api_route_registration
+planner_expectations:
+  should_use_mcp: true
+  may_require_core_xyn_changes: false
+  success_criteria:
+    - Canonical temporal condition is persisted with rolling window count threshold semantics.
+  required_phrases: []
+  forbidden_phrases: []
+deployment:
+  mode: preview
+  requires_xyn_api: true
+  require_branch_isolation: false
+assertions:
+  expected_operations:
+    - condition_definition_create_canonical
+  expected_entities_created:
+    - type: condition_definition
+  expected_response_fields:
+    - path: submitRequest.endpointTarget.submitEndpoint
+      contains: "/mcp"

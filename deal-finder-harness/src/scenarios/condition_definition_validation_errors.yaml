@@ -1,0 +1,30 @@
+id: condition_definition_validation_errors
+suite: deal-finder-condition-definitions
+title: "Condition Definitions: Validation Errors"
+request: >
+  Validate malformed lookback window, operator, and threshold values are rejected cleanly.
+expected_artifacts:
+  - xyn-ui
+expected_primary_artifact: xyn-ui
+optional_artifacts:
+  - xyn-api
+forbidden_artifacts: []
+accepted_dependency_reasons:
+  - ui_command_requires_api_route_registration
+planner_expectations:
+  should_use_mcp: true
+  may_require_core_xyn_changes: false
+  success_criteria:
+    - Invalid temporal condition payloads are rejected with explicit validation errors.
+  required_phrases: []
+  forbidden_phrases: []
+deployment:
+  mode: preview
+  requires_xyn_api: true
+  require_branch_isolation: false
+assertions:
+  expected_operations:
+    - condition_definition_validation_rejected
+  expected_response_fields:
+    - path: submitRequest.endpointTarget.submitEndpoint
+      contains: "/mcp"

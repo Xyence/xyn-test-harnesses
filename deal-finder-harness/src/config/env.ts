@@ -28,7 +28,7 @@ const RawEnvSchema = z
       .transform((value) => value.toLowerCase())
       .pipe(z.enum(["debug", "info", "warn", "error"])),
     DEAL_FINDER_MCP_BASE_URL: z.string().url().optional(),
-    DEAL_FINDER_MCP_ROUTING_MODE: z.enum(["path", "host"]).default("path"),
+    DEAL_FINDER_MCP_ROUTING_MODE: z.enum(["path", "host"]).default("host"),
     MCP_BASE_URL: z.string().url().optional(),
     DEAL_FINDER_MCP_ENDPOINT_SUBMIT_REQUEST: z.string().min(1).optional(),
     MCP_ENDPOINT_SUBMIT_REQUEST: z.string().min(1).default("/mcp/development/requests"),
@@ -55,7 +55,19 @@ const RawEnvSchema = z
     ARTIFACTS_DIR: z.string().default("./artifacts"),
     HARNESS_SCENARIO_ID: z.string().min(1).default("mcp_create_campaign"),
     HARNESS_SCENARIO_SUITE: z
-      .enum(["all", "planner-regression", "deal-finder-mcp", "deal-finder-datasource-crud", "deal-finder-ingestion-smoke"])
+      .enum([
+        "all",
+        "planner-regression",
+        "deal-finder-mcp",
+        "deal-finder-datasource-crud",
+        "deal-finder-ingestion-smoke",
+        "deal-finder-campaign-lifecycle",
+        "deal-finder-notification-lifecycle",
+        "deal-finder-ingest-ops",
+        "deal-finder-campaign-notification-association",
+        "deal-finder-owner-lookup",
+        "deal-finder-condition-definitions",
+      ])
       .default("all"),
   })
   .superRefine((value, ctx) => {

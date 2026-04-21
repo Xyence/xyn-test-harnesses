@@ -51,6 +51,12 @@ function inferScenarioSuite(scenarioId: string): ScenarioSuite {
     "mcp_add_update_datasource",
     "mcp_create_update_notification_rule",
   ]);
+  const dealFinderCampaignLifecyclePrefix = "campaign_lifecycle_";
+  const dealFinderNotificationLifecyclePrefix = "notification_lifecycle_";
+  const dealFinderIngestOpsPrefix = "ingest_ops_";
+  const dealFinderCampaignNotificationAssociationPrefix = "campaign_notification_association_";
+  const dealFinderOwnerLookupPrefix = "owner_lookup_";
+  const dealFinderConditionDefinitionPrefix = "condition_definition_";
   const dealFinderDataSourceCrudPrefix = "dscrud_";
   const dealFinderIngestionPrefix = "dsi_";
   if (dealFinderMcpScenarioIds.has(id)) {
@@ -61,6 +67,24 @@ function inferScenarioSuite(scenarioId: string): ScenarioSuite {
   }
   if (id.startsWith(dealFinderIngestionPrefix)) {
     return "deal-finder-ingestion-smoke";
+  }
+  if (id.startsWith(dealFinderCampaignLifecyclePrefix)) {
+    return "deal-finder-campaign-lifecycle";
+  }
+  if (id.startsWith(dealFinderNotificationLifecyclePrefix)) {
+    return "deal-finder-notification-lifecycle";
+  }
+  if (id.startsWith(dealFinderIngestOpsPrefix)) {
+    return "deal-finder-ingest-ops";
+  }
+  if (id.startsWith(dealFinderCampaignNotificationAssociationPrefix)) {
+    return "deal-finder-campaign-notification-association";
+  }
+  if (id.startsWith(dealFinderOwnerLookupPrefix)) {
+    return "deal-finder-owner-lookup";
+  }
+  if (id.startsWith(dealFinderConditionDefinitionPrefix)) {
+    return "deal-finder-condition-definitions";
   }
   return "planner-regression";
 }

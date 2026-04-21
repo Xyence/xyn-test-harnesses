@@ -70,7 +70,13 @@ export interface DevelopmentRequestResult {
     readonly forbiddenToolProbe: {
       readonly toolName: string;
       readonly ok: boolean;
-      readonly error: unknown;
+      readonly error:
+        | {
+            readonly message: string;
+            readonly status: number | null;
+            readonly errorBody: unknown;
+          }
+        | null;
     } | null;
   };
   readonly rawResponses: {
@@ -425,6 +431,85 @@ async function submitDevelopmentRequestViaMcpProtocol(
         "list_applications",
         {},
       );
+      const isDealFinderSuite =
+        scenario.suite === "deal-finder-mcp" ||
+        scenario.suite === "deal-finder-datasource-crud" ||
+        scenario.suite === "deal-finder-ingestion-smoke" ||
+        scenario.suite === "deal-finder-campaign-lifecycle" ||
+        scenario.suite === "deal-finder-notification-lifecycle" ||
+        scenario.suite === "deal-finder-ingest-ops" ||
+        scenario.suite === "deal-finder-campaign-notification-association" ||
+        scenario.suite === "deal-finder-owner-lookup" ||
+        scenario.suite === "deal-finder-condition-definitions";
+      const hasRootPlannerBootstrap = listedTools.includes("list_applications");
+      if (isDealFinderSuite && !hasRootPlannerBootstrap) {
+        const workspaceProbe = await callMcpToolAllowFailure(config, token, init.sessionId, "list_data_sources", {});
+        const resolvedWorkspaceId = workspaceProbe.ok
+          ? extractFirstString(workspaceProbe.result, [["response", "workspace_id"]]) ?? ""
+          : "";
+        const dealFinderFlowActions = await runDealFinderFlowActions({
+          config,
+          token,
+          mcpSessionId: init.sessionId,
+          scenario,
+          workspaceId: resolvedWorkspaceId,
+          applicationId: "",
+          changeSessionId: "",
+        });
+        const rawResponses: MutableRawResponses = {
+          submitRequest: {
+            endpointTarget: {
+              baseUrl: config.baseUrl,
+              submitEndpoint: mcpEndpointPath,
+              healthEndpoint: runtimeIdentityProbe.endpoint,
+              runtimeIdentity: runtimeIdentityProbe.payload,
+              metadataEndpoint: runtimeIdentityProbe.metadataEndpoint,
+              runtimeIdentityMetadata: runtimeIdentityProbe.metadataPayload,
+              toolsList,
+              listedTools,
+              forbiddenToolProbe,
+            },
+            mcpInitialize: init.responseBody,
+            listApplications: null,
+            createSession: null,
+            previewPrep: null,
+            dealFinderFlowActions,
+            workspaceProbe,
+          },
+          artifactSelection: null,
+          plannerOutput: null,
+          siblingInfo: null,
+          siblingUrl: null,
+          branchInfo: null,
+        };
+
+        return {
+          requestText: scenario.request,
+          selectedArtifacts: [...scenario.expected_artifacts],
+          initialSuggestedArtifacts: [...scenario.expected_artifacts],
+          finalSelectedArtifacts: [...scenario.expected_artifacts],
+          primaryArtifact: scenario.expected_primary_artifact,
+          dependentArtifacts: [],
+          artifactDetails: [],
+          plannerPlan: {
+            summary: `Dedicated Deal Finder MCP execution flow for scenario '${scenario.id}'.`,
+            implementation_steps: [scenario.request],
+            validation_plan: ["Validate Deal Finder MCP operation responses and entity assertions."],
+          },
+          siblingId: `deal-finder-direct-${Date.now()}`,
+          siblingUrl: config.baseUrl,
+          branchName: null,
+          rawResponses,
+          toolSurface: {
+            listedTools,
+            forbiddenToolProbe: {
+              toolName: "list_applications",
+              ok: forbiddenToolProbe.ok,
+              error: forbiddenToolProbe.ok ? null : (forbiddenToolProbe.error ?? null),
+            },
+          },
+        };
+      }
       const listApplications = await callMcpTool(config, token, init.sessionId, "list_applications", {});
       const applicationId = extractFirstString(listApplications, [["response", "applications", "0", "id"]]);
       if (!applicationId) {
@@ -479,9 +564,15 @@ async function submitDevelopmentRequestViaMcpProtocol(
 
       let dealFinderFlowActions: unknown = null;
       if (
-        scenario.suite === "deal-finder-mcp" ||
-        scenario.suite === "deal-finder-datasource-crud" ||
-        scenario.suite === "deal-finder-ingestion-smoke"
+      scenario.suite === "deal-finder-mcp" ||
+      scenario.suite === "deal-finder-datasource-crud" ||
+      scenario.suite === "deal-finder-ingestion-smoke" ||
+      scenario.suite === "deal-finder-campaign-lifecycle" ||
+      scenario.suite === "deal-finder-notification-lifecycle" ||
+      scenario.suite === "deal-finder-ingest-ops" ||
+      scenario.suite === "deal-finder-campaign-notification-association" ||
+      scenario.suite === "deal-finder-owner-lookup" ||
+      scenario.suite === "deal-finder-condition-definitions"
       ) {
         const workspaceId =
           extractFirstString(createSession, [["response", "raw", "session", "workspace_id"]]) ??
@@ -625,7 +716,7 @@ async function submitDevelopmentRequestViaMcpProtocol(
           forbiddenToolProbe: {
             toolName: "list_applications",
             ok: forbiddenToolProbe.ok,
-            error: forbiddenToolProbe.ok ? null : forbiddenToolProbe.error,
+            error: forbiddenToolProbe.ok ? null : (forbiddenToolProbe.error ?? null),
           },
         },
       };
@@ -653,9 +744,6 @@ async function runDealFinderFlowActions(args: {
   changeSessionId: string;
 }): Promise<Record<string, unknown>> {
   const workspaceId = String(args.workspaceId || "").trim();
-  if (!workspaceId) {
-    throw new Error(`Deal Finder MCP flow requires workspace_id; scenario=${args.scenario.id}`);
-  }
   const runSuffix = `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
   if (args.scenario.id === "mcp_create_campaign") {
@@ -673,6 +761,58 @@ async function runDealFinderFlowActions(args: {
       operation: "create_campaign",
       entities: [{ type: "campaign", ...campaign }],
       raw: { createCampaign },
+    };
+  }
+
+  if (args.scenario.id === "campaign_lifecycle_create_get_list_pause_archive") {
+    const createCampaign = await callMcpTool(args.config, args.token, args.mcpSessionId, "create_campaign", {
+      workspace_id: workspaceId,
+      name: `Lifecycle Campaign ${runSuffix}`,
+      campaign_type: "generic",
+      status: "draft",
+      description: "Harness lifecycle coverage",
+    });
+    const campaignId =
+      extractFirstString(createCampaign, [["response", "campaign", "id"]]) ??
+      extractFirstString(createCampaign, [["campaign", "id"]]) ??
+      "";
+    if (!campaignId) {
+      throw new Error(`create_campaign returned no campaign id; raw=${safeStringify(createCampaign)}`);
+    }
+    const getCampaign = await callMcpTool(args.config, args.token, args.mcpSessionId, "get_campaign", {
+      campaign_id: campaignId,
+      workspace_id: workspaceId,
+    });
+    const listCampaigns = await callMcpTool(args.config, args.token, args.mcpSessionId, "list_campaigns", {
+      workspace_id: workspaceId,
+      include_archived: true,
+    });
+    const pauseCampaign = await callMcpTool(args.config, args.token, args.mcpSessionId, "pause_campaign", {
+      campaign_id: campaignId,
+      workspace_id: workspaceId,
+    });
+    const archiveCampaign = await callMcpTool(args.config, args.token, args.mcpSessionId, "archive_campaign", {
+      campaign_id: campaignId,
+      workspace_id: workspaceId,
+    });
+    return {
+      suite: "deal-finder-campaign-lifecycle",
+      operations: ["campaign_create", "campaign_get", "campaign_list", "campaign_pause", "campaign_archive"],
+      entities: [{ type: "campaign", id: campaignId }],
+      raw: { createCampaign, getCampaign, listCampaigns, pauseCampaign, archiveCampaign },
+    };
+  }
+
+  if (args.scenario.id === "campaign_lifecycle_invalid_campaign_get_rejected") {
+    const invalidGet = await callMcpToolAllowFailure(args.config, args.token, args.mcpSessionId, "get_campaign", {
+      campaign_id: "00000000-0000-0000-0000-000000000000",
+      workspace_id: workspaceId,
+    });
+    return {
+      suite: "deal-finder-campaign-lifecycle",
+      operations: [invalidGet.ok ? "campaign_invalid_get_unexpected_success" : "campaign_invalid_get_rejected"],
+      entities: [],
+      raw: { invalidGet },
     };
   }
 
@@ -755,6 +895,65 @@ async function runDealFinderFlowActions(args: {
         { type: "notification_rule", ...updated },
       ],
       raw: { createNotificationRule, updateNotificationRule },
+    };
+  }
+
+  if (args.scenario.id === "notification_lifecycle_create_get_list_pause_activate") {
+    const createNotificationRule = await callMcpTool(args.config, args.token, args.mcpSessionId, "create_notification_rule", {
+      workspace_id: workspaceId,
+      address: `alerts+lifecycle-${runSuffix}@xyence.io`,
+      channel: "slack",
+      event: "campaign",
+      enabled: true,
+      is_primary: false,
+    });
+    const targetId =
+      extractFirstString(createNotificationRule, [["response", "notification_rule", "id"]]) ??
+      extractFirstString(createNotificationRule, [["notification_rule", "id"]]) ??
+      extractFirstString(createNotificationRule, [["response", "target", "id"]]) ??
+      "";
+    if (!targetId) {
+      throw new Error(`create_notification_rule returned no target id; raw=${safeStringify(createNotificationRule)}`);
+    }
+    const getNotificationRule = await callMcpTool(args.config, args.token, args.mcpSessionId, "get_notification_rule", {
+      target_id: targetId,
+      workspace_id: workspaceId,
+    });
+    const listNotificationRules = await callMcpTool(args.config, args.token, args.mcpSessionId, "list_notification_rules", {
+      workspace_id: workspaceId,
+    });
+    const pauseNotificationRule = await callMcpTool(args.config, args.token, args.mcpSessionId, "pause_notification_rule", {
+      target_id: targetId,
+      workspace_id: workspaceId,
+    });
+    const activateNotificationRule = await callMcpTool(args.config, args.token, args.mcpSessionId, "activate_notification_rule", {
+      target_id: targetId,
+      workspace_id: workspaceId,
+    });
+    return {
+      suite: "deal-finder-notification-lifecycle",
+      operations: [
+        "notification_rule_create",
+        "notification_rule_get",
+        "notification_rule_list",
+        "notification_rule_pause",
+        "notification_rule_activate",
+      ],
+      entities: [{ type: "notification_rule", id: targetId }],
+      raw: { createNotificationRule, getNotificationRule, listNotificationRules, pauseNotificationRule, activateNotificationRule },
+    };
+  }
+
+  if (args.scenario.id === "notification_lifecycle_invalid_get_rejected") {
+    const invalidGet = await callMcpToolAllowFailure(args.config, args.token, args.mcpSessionId, "get_notification_rule", {
+      target_id: "00000000-0000-0000-0000-000000000000",
+      workspace_id: workspaceId,
+    });
+    return {
+      suite: "deal-finder-notification-lifecycle",
+      operations: [invalidGet.ok ? "notification_invalid_get_unexpected_success" : "notification_invalid_get_rejected"],
+      entities: [],
+      raw: { invalidGet },
     };
   }
 
@@ -941,6 +1140,83 @@ async function runDealFinderFlowActions(args: {
     });
   }
 
+  if (args.scenario.suite === "deal-finder-ingest-ops") {
+    if (args.scenario.id === "ingest_ops_invalid_source_status_rejected") {
+      const invalidSourceId = "00000000-0000-0000-0000-000000000000";
+      const getStatus = await callMcpToolAllowFailure(args.config, args.token, args.mcpSessionId, "get_data_source_ingest_status", {
+        source_id: invalidSourceId,
+        workspace_id: workspaceId,
+        limit: 20,
+      });
+      const listRuns = await callMcpToolAllowFailure(args.config, args.token, args.mcpSessionId, "list_data_source_runs", {
+        source_id: invalidSourceId,
+        workspace_id: workspaceId,
+        limit: 20,
+      });
+      const quality = await callMcpToolAllowFailure(args.config, args.token, args.mcpSessionId, "get_data_source_quality_report", {
+        source_id: invalidSourceId,
+        workspace_id: workspaceId,
+        limit: 20,
+      });
+      return {
+        suite: "deal-finder-ingest-ops",
+        operations: [
+          !getStatus.ok || !listRuns.ok || !quality.ok
+            ? "ingest_status_unavailable"
+            : "ingest_status_unexpected_success",
+        ],
+        entities: [],
+        raw: { getStatus, listRuns, quality },
+      };
+    }
+    const fixtureId =
+      args.scenario.ingestion_smoke?.fixture_ids && args.scenario.ingestion_smoke.fixture_ids.length > 0
+        ? args.scenario.ingestion_smoke.fixture_ids[0]
+        : "current_parcels_shapefile";
+    const fixture = stLouisFixture(fixtureId);
+    return await runDealFinderIngestOpsFlow({
+      config: args.config,
+      token: args.token,
+      mcpSessionId: args.mcpSessionId,
+      fixture,
+      workspaceId,
+      runSuffix: `${runSuffix}-${fixture.fixtureId}`,
+      requireQualitySummary: Boolean(args.scenario.ingestion_smoke?.require_quality_summary),
+    });
+  }
+
+  if (args.scenario.suite === "deal-finder-campaign-notification-association") {
+    return await runDealFinderCampaignNotificationAssociationFlow({
+      config: args.config,
+      token: args.token,
+      mcpSessionId: args.mcpSessionId,
+      workspaceId,
+      runSuffix,
+      scenarioId: args.scenario.id,
+    });
+  }
+
+  if (args.scenario.suite === "deal-finder-owner-lookup") {
+    return await runDealFinderOwnerLookupFlow({
+      config: args.config,
+      token: args.token,
+      mcpSessionId: args.mcpSessionId,
+      workspaceId,
+      scenarioId: args.scenario.id,
+    });
+  }
+
+  if (args.scenario.suite === "deal-finder-condition-definitions") {
+    return await runDealFinderConditionDefinitionFlow({
+      config: args.config,
+      token: args.token,
+      mcpSessionId: args.mcpSessionId,
+      workspaceId,
+      scenarioId: args.scenario.id,
+      runSuffix,
+    });
+  }
+
   return { operation: "none", note: "No Deal Finder flow action defined for this scenario" };
 }
 
@@ -1060,9 +1336,11 @@ async function runStLouisDataSourceCrudFlow(args: {
 
   if (args.includeIngestSmoke) {
     operations.push("datasource_ingest_smoke_checked");
-    const refreshDataSource = await callMcpToolAllowFailure(args.config, args.token, args.mcpSessionId, "refresh_data_source", {
+    const refreshDataSource = await callMcpToolAllowFailure(args.config, args.token, args.mcpSessionId, "run_data_source_ingest", {
       source_id: sourceId,
       workspace_id: args.workspaceId,
+      source_url: args.fixture.locationUrl,
+      source: args.fixture.baseKey,
     });
     raw.refreshDataSource = refreshDataSource;
     if (refreshDataSource.ok) {
@@ -1131,9 +1409,11 @@ async function runStLouisIngestionSmokeFlow(args: {
     throw new Error(`create_data_source returned no source id; raw=${safeStringify(createDataSource)}`);
   }
 
-  const initialTrigger = await callMcpToolAllowFailure(args.config, args.token, args.mcpSessionId, "refresh_data_source", {
+  const initialTrigger = await callMcpToolAllowFailure(args.config, args.token, args.mcpSessionId, "run_data_source_ingest", {
     source_id: sourceId,
     workspace_id: args.workspaceId,
+    source_url: args.fixture.locationUrl,
+    source: args.fixture.baseKey,
   });
   raw.refreshDataSource = initialTrigger;
   operations.push("ingest_trigger_attempted");
@@ -1221,10 +1501,12 @@ async function runStLouisIngestionSmokeFlow(args: {
       args.config,
       args.token,
       args.mcpSessionId,
-      "refresh_data_source",
+      "run_data_source_ingest",
       {
         source_id: sourceId,
         workspace_id: args.workspaceId,
+        source_url: args.fixture.locationUrl,
+        source: args.fixture.baseKey,
       },
     );
     raw.refreshWhilePaused = whilePausedTrigger;
@@ -1243,10 +1525,12 @@ async function runStLouisIngestionSmokeFlow(args: {
       args.config,
       args.token,
       args.mcpSessionId,
-      "refresh_data_source",
+      "run_data_source_ingest",
       {
         source_id: sourceId,
         workspace_id: args.workspaceId,
+        source_url: args.fixture.locationUrl,
+        source: args.fixture.baseKey,
       },
     );
     raw.refreshAfterEnable = afterEnableTrigger;
@@ -1281,18 +1565,645 @@ async function runStLouisIngestionSmokeFlow(args: {
   };
 }
 
+async function runDealFinderIngestOpsFlow(args: {
+  config: McpDevelopmentConfig;
+  token: string;
+  mcpSessionId: string;
+  fixture: StLouisSourceFixture;
+  workspaceId: string;
+  runSuffix: string;
+  requireQualitySummary: boolean;
+}): Promise<Record<string, unknown>> {
+  const sourceKey = `${args.fixture.baseKey}-${args.runSuffix}`;
+  const sourceName = `${args.fixture.baseName} ${args.runSuffix}`;
+  const operations: string[] = [];
+  const raw: Record<string, unknown> = { fixture: args.fixture };
+
+  const createDataSource = await callMcpTool(args.config, args.token, args.mcpSessionId, "create_data_source", {
+    key: sourceKey,
+    name: sourceName,
+    source_type: args.fixture.sourceType,
+    source_mode: args.fixture.sourceMode,
+    refresh_cadence_seconds: args.fixture.refreshCadenceSeconds,
+    payload: {
+      configuration: args.fixture.configuration,
+      metadata: {
+        ...args.fixture.metadata,
+        parser_kind: args.fixture.parserKind,
+        location_url: args.fixture.locationUrl,
+      },
+    },
+  });
+  operations.push("datasource_create");
+  raw.createDataSource = createDataSource;
+
+  const sourceId =
+    extractFirstString(createDataSource, [["response", "data_source", "id"]]) ??
+    extractFirstString(createDataSource, [["response", "source_connector", "id"]]) ??
+    extractFirstString(createDataSource, [["data_source", "id"]]) ??
+    "";
+  if (!sourceId) {
+    throw new Error(`create_data_source returned no source id; raw=${safeStringify(createDataSource)}`);
+  }
+
+  const runIngest = await callMcpToolAllowFailure(args.config, args.token, args.mcpSessionId, "run_data_source_ingest", {
+    source_id: sourceId,
+    workspace_id: args.workspaceId,
+    source_url: args.fixture.locationUrl,
+    source: args.fixture.baseKey,
+  });
+  const activateBeforeIngest = await callMcpToolAllowFailure(args.config, args.token, args.mcpSessionId, "activate_data_source", {
+    source_id: sourceId,
+    workspace_id: args.workspaceId,
+  });
+  raw.activateBeforeIngest = activateBeforeIngest;
+  if (activateBeforeIngest.ok) {
+    operations.push("datasource_enable");
+  }
+
+  const secondRunIngest = activateBeforeIngest.ok
+    ? await callMcpToolAllowFailure(args.config, args.token, args.mcpSessionId, "run_data_source_ingest", {
+        source_id: sourceId,
+        workspace_id: args.workspaceId,
+        source_url: args.fixture.locationUrl,
+        source: args.fixture.baseKey,
+      })
+    : runIngest;
+  raw.runDataSourceIngestInitial = runIngest;
+  raw.runDataSourceIngest = secondRunIngest;
+  operations.push(secondRunIngest.ok ? "ingest_request_accepted" : "ingest_trigger_failure");
+
+  const ingestStatus = await callMcpToolAllowFailure(args.config, args.token, args.mcpSessionId, "get_data_source_ingest_status", {
+    source_id: sourceId,
+    workspace_id: args.workspaceId,
+    limit: 20,
+  });
+  raw.getDataSourceIngestStatus = ingestStatus;
+  operations.push(ingestStatus.ok ? "ingest_status_visible" : "ingest_status_unavailable");
+
+  const listRuns = await callMcpToolAllowFailure(args.config, args.token, args.mcpSessionId, "list_data_source_runs", {
+    source_id: sourceId,
+    workspace_id: args.workspaceId,
+    limit: 20,
+  });
+  raw.listDataSourceRuns = listRuns;
+  operations.push(listRuns.ok ? "ingest_runs_list_visible" : "ingest_runs_list_unavailable");
+
+  const qualityReport = await callMcpToolAllowFailure(args.config, args.token, args.mcpSessionId, "get_data_source_quality_report", {
+    source_id: sourceId,
+    workspace_id: args.workspaceId,
+    limit: 20,
+  });
+  raw.getDataSourceQualityReport = qualityReport;
+  if (qualityReport.ok) {
+    const present =
+      extractFirstBoolean(qualityReport.result, [["response", "quality_summary_present"]]) ??
+      extractFirstBoolean(qualityReport.result, [["quality_summary_present"]]) ??
+      false;
+    if (present) {
+      operations.push("quality_status_summary_present");
+    } else if (args.requireQualitySummary) {
+      operations.push("quality_status_summary_missing");
+    } else {
+      operations.push("quality_status_summary_optional");
+    }
+  } else if (args.requireQualitySummary) {
+    operations.push("quality_report_missing");
+  } else {
+    operations.push("quality_report_optional_unavailable");
+  }
+
+  return {
+    suite: "deal-finder-ingest-ops",
+    operations: dedupeStrings(operations),
+    entities: [{ type: "datasource", id: sourceId, key: sourceKey, name: sourceName }],
+    raw,
+  };
+}
+
+async function runDealFinderCampaignNotificationAssociationFlow(args: {
+  config: McpDevelopmentConfig;
+  token: string;
+  mcpSessionId: string;
+  workspaceId: string;
+  runSuffix: string;
+  scenarioId: string;
+}): Promise<Record<string, unknown>> {
+  const operations: string[] = [];
+  const raw: Record<string, unknown> = {};
+  const campaignName = `Campaign Notification Association ${args.runSuffix}`;
+  const createCampaign = await callMcpTool(args.config, args.token, args.mcpSessionId, "create_campaign", {
+    workspace_id: args.workspaceId,
+    name: campaignName,
+    campaign_type: "generic",
+    status: "draft",
+  });
+  operations.push("campaign_create");
+  raw.createCampaign = createCampaign;
+  const campaignId =
+    extractFirstString(createCampaign, [["response", "campaign", "id"]]) ??
+    extractFirstString(createCampaign, [["campaign", "id"]]) ??
+    "";
+  if (!campaignId) {
+    throw new Error(`create_campaign returned no campaign id; raw=${safeStringify(createCampaign)}`);
+  }
+
+  const createRuleA = await callMcpTool(args.config, args.token, args.mcpSessionId, "create_notification_rule", {
+    workspace_id: args.workspaceId,
+    address: `alerts+assoc-a-${args.runSuffix}@xyence.io`,
+    channel: "email",
+    event: "campaign",
+    enabled: true,
+  });
+  operations.push("notification_rule_create");
+  raw.createRuleA = createRuleA;
+  const targetIdA =
+    extractFirstString(createRuleA, [["response", "notification_rule", "id"]]) ??
+    extractFirstString(createRuleA, [["notification_rule", "id"]]) ??
+    "";
+  if (!targetIdA) {
+    throw new Error(`create_notification_rule returned no target id; raw=${safeStringify(createRuleA)}`);
+  }
+
+  const createRuleB = await callMcpTool(args.config, args.token, args.mcpSessionId, "create_notification_rule", {
+    workspace_id: args.workspaceId,
+    address: `alerts+assoc-b-${args.runSuffix}@xyence.io`,
+    channel: "email",
+    event: "campaign",
+    enabled: true,
+  });
+  raw.createRuleB = createRuleB;
+  const targetIdB =
+    extractFirstString(createRuleB, [["response", "notification_rule", "id"]]) ??
+    extractFirstString(createRuleB, [["notification_rule", "id"]]) ??
+    "";
+
+  const attachA = await callMcpTool(args.config, args.token, args.mcpSessionId, "add_campaign_notification_rule", {
+    workspace_id: args.workspaceId,
+    campaign_id: campaignId,
+    target_id: targetIdA,
+  });
+  operations.push("campaign_notification_attach");
+  raw.attachA = attachA;
+
+  if (args.scenarioId === "campaign_notification_association_attach_multiple_and_list" && targetIdB) {
+    const attachB = await callMcpTool(args.config, args.token, args.mcpSessionId, "add_campaign_notification_rule", {
+      workspace_id: args.workspaceId,
+      campaign_id: campaignId,
+      target_id: targetIdB,
+    });
+    raw.attachB = attachB;
+    operations.push("campaign_notification_attach_multiple");
+  }
+
+  if (args.scenarioId === "campaign_notification_association_duplicate_attach_rejected") {
+    const duplicateAttach = await callMcpToolAllowFailure(
+      args.config,
+      args.token,
+      args.mcpSessionId,
+      "add_campaign_notification_rule",
+      {
+        workspace_id: args.workspaceId,
+        campaign_id: campaignId,
+        target_id: targetIdA,
+      },
+    );
+    raw.duplicateAttach = duplicateAttach;
+    operations.push(duplicateAttach.ok ? "campaign_notification_duplicate_attach_unexpected_success" : "campaign_notification_duplicate_attach_rejected");
+  }
+
+  const listAttached = await callMcpTool(args.config, args.token, args.mcpSessionId, "list_campaign_notification_rules", {
+    workspace_id: args.workspaceId,
+    campaign_id: campaignId,
+  });
+  operations.push("campaign_notification_list");
+  raw.listAttached = listAttached;
+
+  if (args.scenarioId === "campaign_notification_association_remove_attached_rule") {
+    const remove = await callMcpTool(args.config, args.token, args.mcpSessionId, "remove_campaign_notification_rule", {
+      workspace_id: args.workspaceId,
+      campaign_id: campaignId,
+      target_id: targetIdA,
+    });
+    raw.remove = remove;
+    operations.push("campaign_notification_remove");
+    const listAfterRemove = await callMcpTool(args.config, args.token, args.mcpSessionId, "list_campaign_notification_rules", {
+      workspace_id: args.workspaceId,
+      campaign_id: campaignId,
+    });
+    raw.listAfterRemove = listAfterRemove;
+    operations.push("campaign_notification_list_after_remove");
+  }
+
+  if (args.scenarioId === "campaign_notification_association_invalid_ids_rejected") {
+    const invalidCampaign = await callMcpToolAllowFailure(
+      args.config,
+      args.token,
+      args.mcpSessionId,
+      "add_campaign_notification_rule",
+      {
+        workspace_id: args.workspaceId,
+        campaign_id: "00000000-0000-0000-0000-000000000000",
+        target_id: targetIdA,
+      },
+    );
+    const invalidRule = await callMcpToolAllowFailure(
+      args.config,
+      args.token,
+      args.mcpSessionId,
+      "add_campaign_notification_rule",
+      {
+        workspace_id: args.workspaceId,
+        campaign_id: campaignId,
+        target_id: "00000000-0000-0000-0000-000000000000",
+      },
+    );
+    raw.invalidCampaign = invalidCampaign;
+    raw.invalidRule = invalidRule;
+    operations.push(
+      !invalidCampaign.ok && !invalidRule.ok
+        ? "campaign_notification_invalid_ids_rejected"
+        : "campaign_notification_invalid_ids_unexpected_success",
+    );
+  }
+
+  return {
+    suite: "deal-finder-campaign-notification-association",
+    operations: dedupeStrings(operations),
+    entities: [
+      { type: "campaign", id: campaignId, name: campaignName },
+      { type: "notification_rule", id: targetIdA },
+      ...(targetIdB ? [{ type: "notification_rule", id: targetIdB }] : []),
+    ],
+    raw,
+  };
+}
+
+async function runDealFinderOwnerLookupFlow(args: {
+  config: McpDevelopmentConfig;
+  token: string;
+  mcpSessionId: string;
+  workspaceId: string;
+  scenarioId: string;
+}): Promise<Record<string, unknown>> {
+  const raw: Record<string, unknown> = {};
+  const operations: string[] = [];
+  const exactAddress = "1200 Market St, Saint Louis, MO 63103";
+  const ambiguousAddress = "1 Main St";
+  const noMatchAddress = "99999 Imaginary Address Ln, Saint Louis, MO";
+
+  if (args.scenarioId === "owner_lookup_valid_address") {
+    operations.push("owner_lookup_address_processed");
+    const lookup = await callMcpToolAllowFailure(
+      args.config,
+      args.token,
+      args.mcpSessionId,
+      "get_property_owner_by_address",
+      {
+        workspace_id: args.workspaceId,
+        address: exactAddress,
+      },
+    );
+    raw.lookup = lookup;
+    if (!lookup.ok) {
+      operations.push("owner_lookup_failed");
+    } else {
+      const matchStatus =
+        extractFirstString(lookup.result, [["response", "match_status"]]) ??
+        extractFirstString(lookup.result, [["match_status"]]) ??
+        "unknown";
+      const ownerAvailable =
+        extractFirstBoolean(lookup.result, [["response", "owner_available"]]) ??
+        extractFirstBoolean(lookup.result, [["owner_available"]]) ??
+        false;
+      if (matchStatus === "exact_match" && ownerAvailable) {
+        operations.push("owner_lookup_resolved_with_owner");
+      } else if (matchStatus === "exact_match") {
+        operations.push("owner_lookup_resolved_owner_unavailable");
+      } else {
+        operations.push("owner_lookup_non_exact");
+      }
+    }
+    return { suite: "deal-finder-owner-lookup", operations, entities: [], raw };
+  }
+
+  if (args.scenarioId === "owner_lookup_ambiguous_address_behavior") {
+    operations.push("owner_lookup_ambiguous_processed");
+    const resolve = await callMcpToolAllowFailure(
+      args.config,
+      args.token,
+      args.mcpSessionId,
+      "resolve_parcel_by_address",
+      {
+        workspace_id: args.workspaceId,
+        address: ambiguousAddress,
+      },
+    );
+    raw.resolve = resolve;
+    if (!resolve.ok) {
+      operations.push("owner_lookup_ambiguous_request_rejected");
+    } else {
+      const matchStatus =
+        extractFirstString(resolve.result, [["response", "match_status"]]) ??
+        extractFirstString(resolve.result, [["match_status"]]) ??
+        "unknown";
+      if (matchStatus === "low_confidence" || matchStatus === "ambiguous") {
+        operations.push("owner_lookup_ambiguous_or_low_confidence_handled");
+      } else {
+        operations.push("owner_lookup_ambiguous_not_signaled");
+      }
+    }
+    return { suite: "deal-finder-owner-lookup", operations, entities: [], raw };
+  }
+
+  if (args.scenarioId === "owner_lookup_no_match_behavior") {
+    operations.push("owner_lookup_no_match_processed");
+    const resolve = await callMcpToolAllowFailure(
+      args.config,
+      args.token,
+      args.mcpSessionId,
+      "resolve_parcel_by_address",
+      {
+        workspace_id: args.workspaceId,
+        address: noMatchAddress,
+      },
+    );
+    raw.resolve = resolve;
+    if (!resolve.ok) {
+      operations.push("owner_lookup_no_match_request_failed");
+    } else {
+      const matchStatus =
+        extractFirstString(resolve.result, [["response", "match_status"]]) ??
+        extractFirstString(resolve.result, [["match_status"]]) ??
+        "unknown";
+      operations.push(matchStatus === "no_match" ? "owner_lookup_no_match" : "owner_lookup_no_match_unexpected");
+    }
+    return { suite: "deal-finder-owner-lookup", operations, entities: [], raw };
+  }
+
+  if (args.scenarioId === "owner_lookup_owner_unavailable_behavior") {
+    operations.push("owner_lookup_owner_unavailable_processed");
+    const lookup = await callMcpToolAllowFailure(
+      args.config,
+      args.token,
+      args.mcpSessionId,
+      "get_property_owner_by_address",
+      {
+        workspace_id: args.workspaceId,
+        address: exactAddress,
+      },
+    );
+    raw.lookup = lookup;
+    if (!lookup.ok) {
+      operations.push("owner_lookup_owner_unavailable_request_failed");
+    } else {
+      const ownerStatus =
+        extractFirstString(lookup.result, [["response", "owner_status"]]) ??
+        extractFirstString(lookup.result, [["owner_status"]]) ??
+        "unknown";
+      operations.push(ownerStatus === "owner_unavailable" ? "owner_lookup_owner_unavailable" : "owner_lookup_owner_available_or_other");
+    }
+    return { suite: "deal-finder-owner-lookup", operations, entities: [], raw };
+  }
+
+  return {
+    suite: "deal-finder-owner-lookup",
+    operations: ["owner_lookup_noop"],
+    entities: [],
+    raw,
+  };
+}
+
+async function runDealFinderConditionDefinitionFlow(args: {
+  config: McpDevelopmentConfig;
+  token: string;
+  mcpSessionId: string;
+  workspaceId: string;
+  scenarioId: string;
+  runSuffix: string;
+}): Promise<Record<string, unknown>> {
+  const raw: Record<string, unknown> = {};
+  const operations: string[] = [];
+  const conditionName = `Distress ${args.runSuffix}`;
+  const signalType = "csb_ticket";
+
+  if (args.scenarioId === "condition_definition_create_list_get_update_activate_pause") {
+    const create = await callMcpTool(args.config, args.token, args.mcpSessionId, "create_condition_definition", {
+      workspace_id: args.workspaceId,
+      name: conditionName,
+      signal_type: signalType,
+      source_filter: { category: "sanitation" },
+      lookback_value: 30,
+      lookback_unit: "days",
+      aggregation_type: "count",
+      operator: "gte",
+      threshold: 3,
+      severity: "medium",
+      weight: 1.5,
+      enabled: true,
+    });
+    operations.push("condition_definition_create");
+    raw.create = create;
+
+    const conditionId =
+      extractFirstString(create, [["response", "condition_definition", "id"]]) ??
+      extractFirstString(create, [["condition_definition", "id"]]) ??
+      "";
+    if (!conditionId) {
+      throw new Error(`create_condition_definition returned no condition id; raw=${safeStringify(create)}`);
+    }
+
+    const list = await callMcpTool(args.config, args.token, args.mcpSessionId, "list_condition_definitions", {
+      workspace_id: args.workspaceId,
+      include_disabled: true,
+    });
+    operations.push("condition_definition_list");
+    raw.list = list;
+
+    const get = await callMcpTool(args.config, args.token, args.mcpSessionId, "get_condition_definition", {
+      workspace_id: args.workspaceId,
+      condition_id: conditionId,
+    });
+    operations.push("condition_definition_get");
+    raw.get = get;
+
+    const update = await callMcpTool(args.config, args.token, args.mcpSessionId, "update_condition_definition", {
+      workspace_id: args.workspaceId,
+      condition_id: conditionId,
+      payload: {
+        threshold: 4,
+        severity: "high",
+      },
+    });
+    operations.push("condition_definition_update");
+    raw.update = update;
+
+    const pause = await callMcpTool(args.config, args.token, args.mcpSessionId, "pause_condition_definition", {
+      workspace_id: args.workspaceId,
+      condition_id: conditionId,
+    });
+    operations.push("condition_definition_pause");
+    raw.pause = pause;
+
+    const activate = await callMcpTool(args.config, args.token, args.mcpSessionId, "activate_condition_definition", {
+      workspace_id: args.workspaceId,
+      condition_id: conditionId,
+    });
+    operations.push("condition_definition_activate");
+    raw.activate = activate;
+
+    return {
+      suite: "deal-finder-condition-definitions",
+      operations: dedupeStrings(operations),
+      entities: [{ type: "condition_definition", id: conditionId, name: conditionName }],
+      raw,
+    };
+  }
+
+  if (args.scenarioId === "condition_definition_validation_errors") {
+    const invalidWindow = await callMcpToolAllowFailure(
+      args.config,
+      args.token,
+      args.mcpSessionId,
+      "create_condition_definition",
+      {
+        workspace_id: args.workspaceId,
+        name: `${conditionName}-bad-window`,
+        signal_type: signalType,
+        lookback_value: -5,
+        lookback_unit: "days",
+        aggregation_type: "count",
+        operator: "gte",
+        threshold: 3,
+      },
+    );
+    raw.invalidWindow = invalidWindow;
+
+    const invalidOperator = await callMcpToolAllowFailure(
+      args.config,
+      args.token,
+      args.mcpSessionId,
+      "create_condition_definition",
+      {
+        workspace_id: args.workspaceId,
+        name: `${conditionName}-bad-operator`,
+        signal_type: signalType,
+        lookback_value: 30,
+        lookback_unit: "days",
+        aggregation_type: "count",
+        operator: "between",
+        threshold: 3,
+      },
+    );
+    raw.invalidOperator = invalidOperator;
+
+    const invalidThreshold = await callMcpToolAllowFailure(
+      args.config,
+      args.token,
+      args.mcpSessionId,
+      "create_condition_definition",
+      {
+        workspace_id: args.workspaceId,
+        name: `${conditionName}-bad-threshold`,
+        signal_type: signalType,
+        lookback_value: 30,
+        lookback_unit: "days",
+        aggregation_type: "count",
+        operator: "gte",
+        threshold: -1,
+      },
+    );
+    raw.invalidThreshold = invalidThreshold;
+
+    operations.push(
+      !invalidWindow.ok && !invalidOperator.ok && !invalidThreshold.ok
+        ? "condition_definition_validation_rejected"
+        : "condition_definition_validation_unexpected_success",
+    );
+
+    return {
+      suite: "deal-finder-condition-definitions",
+      operations,
+      entities: [],
+      raw,
+    };
+  }
+
+  if (args.scenarioId === "condition_definition_canonical_3_tickets_in_30_days") {
+    const create = await callMcpTool(args.config, args.token, args.mcpSessionId, "create_condition_definition", {
+      workspace_id: args.workspaceId,
+      name: "3 tickets in 30 days",
+      signal_type: "csb_ticket",
+      source_filter: { ticket_type: "csb" },
+      lookback_value: 30,
+      lookback_unit: "days",
+      aggregation_type: "count",
+      operator: "gte",
+      threshold: 3,
+      severity: "medium",
+      weight: 1.0,
+      enabled: true,
+    });
+    raw.create = create;
+    operations.push("condition_definition_create_canonical");
+    return {
+      suite: "deal-finder-condition-definitions",
+      operations,
+      entities: [
+        {
+          type: "condition_definition",
+          name: "3 tickets in 30 days",
+        },
+      ],
+      raw,
+    };
+  }
+
+  return {
+    suite: "deal-finder-condition-definitions",
+    operations: ["condition_definition_noop"],
+    entities: [],
+    raw,
+  };
+}
+
 async function callMcpToolAllowFailure(
   config: McpDevelopmentConfig,
   token: string,
   sessionId: string,
   toolName: string,
   args: Record<string, unknown>,
-): Promise<{ ok: boolean; result?: Record<string, unknown>; error?: unknown }> {
+): Promise<{
+  ok: boolean;
+  result?: Record<string, unknown>;
+  error?: {
+    message: string;
+    status: number | null;
+    errorBody: unknown;
+  };
+}> {
   try {
     const result = await callMcpTool(config, token, sessionId, toolName, args);
     return { ok: true, result };
   } catch (error: unknown) {
-    return { ok: false, error: error instanceof Error ? error.message : error };
+    if (error instanceof McpHttpError) {
+      return {
+        ok: false,
+        error: {
+          message: error.message,
+          status: error.status,
+          errorBody: error.errorBody,
+        },
+      };
+    }
+    return {
+      ok: false,
+      error: {
+        message: error instanceof Error ? error.message : String(error),
+        status: null,
+        errorBody: null,
+      },
+    };
   }
 }
 
@@ -2134,6 +3045,16 @@ function extractFirstString(value: unknown, paths: readonly (readonly string[])[
   for (const path of paths) {
     const candidate = getByPath(value, path);
     if (typeof candidate === "string" && candidate.length > 0) {
+      return candidate;
+    }
+  }
+  return undefined;
+}
+
+function extractFirstBoolean(value: unknown, paths: readonly (readonly string[])[]): boolean | undefined {
+  for (const path of paths) {
+    const candidate = getByPath(value, path);
+    if (typeof candidate === "boolean") {
       return candidate;
     }
   }

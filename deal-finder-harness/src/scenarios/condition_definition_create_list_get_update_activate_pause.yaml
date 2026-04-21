@@ -1,0 +1,37 @@
+id: condition_definition_create_list_get_update_activate_pause
+suite: deal-finder-condition-definitions
+title: "Condition Definitions: CRUD + Activation Lifecycle"
+request: >
+  Create, list, get, update, pause, and reactivate a temporal distress condition definition through MCP.
+expected_artifacts:
+  - xyn-ui
+expected_primary_artifact: xyn-ui
+optional_artifacts:
+  - xyn-api
+forbidden_artifacts: []
+accepted_dependency_reasons:
+  - ui_command_requires_api_route_registration
+planner_expectations:
+  should_use_mcp: true
+  may_require_core_xyn_changes: false
+  success_criteria:
+    - Condition definition lifecycle operations succeed and remain queryable.
+  required_phrases: []
+  forbidden_phrases: []
+deployment:
+  mode: preview
+  requires_xyn_api: true
+  require_branch_isolation: false
+assertions:
+  expected_operations:
+    - condition_definition_create
+    - condition_definition_list
+    - condition_definition_get
+    - condition_definition_update
+    - condition_definition_pause
+    - condition_definition_activate
+  expected_entities_created:
+    - type: condition_definition
+  expected_response_fields:
+    - path: submitRequest.endpointTarget.submitEndpoint
+      contains: "/mcp"

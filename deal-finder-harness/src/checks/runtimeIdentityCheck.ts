@@ -37,7 +37,17 @@ export function runRuntimeIdentityCheck(
   developmentResult: DevelopmentRequestResult,
   expectation: RuntimeIdentityExpectation,
 ): RuntimeIdentityCheckResult {
-  if (scenario.suite !== "deal-finder-mcp" && scenario.suite !== "deal-finder-datasource-crud") {
+  if (
+    scenario.suite !== "deal-finder-mcp" &&
+    scenario.suite !== "deal-finder-datasource-crud" &&
+    scenario.suite !== "deal-finder-ingestion-smoke" &&
+    scenario.suite !== "deal-finder-campaign-lifecycle" &&
+    scenario.suite !== "deal-finder-notification-lifecycle" &&
+    scenario.suite !== "deal-finder-ingest-ops" &&
+    scenario.suite !== "deal-finder-campaign-notification-association" &&
+    scenario.suite !== "deal-finder-owner-lookup" &&
+    scenario.suite !== "deal-finder-condition-definitions"
+  ) {
     return {
       passed: true,
       details: ["Runtime identity check not required for this suite"],

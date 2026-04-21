@@ -1,0 +1,30 @@
+id: campaign_lifecycle_invalid_campaign_get_rejected
+suite: deal-finder-campaign-lifecycle
+title: "Deal Finder Campaign Lifecycle: Invalid Campaign Get Rejected"
+request: >
+  Attempt to fetch a non-existent campaign id and ensure MCP returns a clean validation/not-found style failure.
+expected_artifacts:
+  - xyn-ui
+expected_primary_artifact: xyn-ui
+optional_artifacts:
+  - xyn-api
+forbidden_artifacts: []
+accepted_dependency_reasons:
+  - ui_command_requires_api_route_registration
+planner_expectations:
+  should_use_mcp: true
+  may_require_core_xyn_changes: false
+  success_criteria:
+    - Invalid campaign id is rejected.
+  required_phrases: []
+  forbidden_phrases: []
+deployment:
+  mode: preview
+  requires_xyn_api: true
+  require_branch_isolation: false
+assertions:
+  expected_operations:
+    - campaign_invalid_get_rejected
+  expected_response_fields:
+    - path: submitRequest.endpointTarget.submitEndpoint
+      contains: "/mcp"

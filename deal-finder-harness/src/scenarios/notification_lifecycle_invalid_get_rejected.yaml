@@ -1,0 +1,30 @@
+id: notification_lifecycle_invalid_get_rejected
+suite: deal-finder-notification-lifecycle
+title: "Deal Finder Notification Lifecycle: Invalid Get Rejected"
+request: >
+  Attempt to fetch a non-existent notification rule id and verify a clean rejected response.
+expected_artifacts:
+  - xyn-ui
+expected_primary_artifact: xyn-ui
+optional_artifacts:
+  - xyn-api
+forbidden_artifacts: []
+accepted_dependency_reasons:
+  - ui_command_requires_api_route_registration
+planner_expectations:
+  should_use_mcp: true
+  may_require_core_xyn_changes: false
+  success_criteria:
+    - Invalid notification id is rejected.
+  required_phrases: []
+  forbidden_phrases: []
+deployment:
+  mode: preview
+  requires_xyn_api: true
+  require_branch_isolation: false
+assertions:
+  expected_operations:
+    - notification_invalid_get_rejected
+  expected_response_fields:
+    - path: submitRequest.endpointTarget.submitEndpoint
+      contains: "/mcp"

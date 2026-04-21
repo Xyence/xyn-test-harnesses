@@ -1,0 +1,30 @@
+id: owner_lookup_valid_address
+suite: deal-finder-owner-lookup
+title: "Owner Lookup: Valid Address Resolution"
+request: >
+  Resolve a canonical parcel from a valid address and return an owner snapshot when available.
+expected_artifacts:
+  - xyn-ui
+expected_primary_artifact: xyn-ui
+optional_artifacts:
+  - xyn-api
+forbidden_artifacts: []
+accepted_dependency_reasons:
+  - ui_command_requires_api_route_registration
+planner_expectations:
+  should_use_mcp: true
+  may_require_core_xyn_changes: false
+  success_criteria:
+    - Address resolves to a parcel and owner status is explicit.
+  required_phrases: []
+  forbidden_phrases: []
+deployment:
+  mode: preview
+  requires_xyn_api: true
+  require_branch_isolation: false
+assertions:
+  expected_operations:
+    - owner_lookup_address_processed
+  expected_response_fields:
+    - path: submitRequest.endpointTarget.submitEndpoint
+      contains: "/mcp"

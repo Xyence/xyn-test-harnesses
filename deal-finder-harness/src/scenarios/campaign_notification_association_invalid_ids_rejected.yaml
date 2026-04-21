@@ -1,0 +1,36 @@
+id: campaign_notification_association_invalid_ids_rejected
+suite: deal-finder-campaign-notification-association
+title: "Campaign Notification Association: Invalid IDs Rejected"
+request: >
+  Attempt to attach with invalid campaign id and invalid notification rule id and verify both are rejected.
+expected_artifacts:
+  - xyn-ui
+expected_primary_artifact: xyn-ui
+optional_artifacts:
+  - xyn-api
+forbidden_artifacts: []
+accepted_dependency_reasons:
+  - ui_command_requires_api_route_registration
+planner_expectations:
+  should_use_mcp: true
+  may_require_core_xyn_changes: false
+  success_criteria:
+    - Invalid campaign and invalid notification rule association requests are rejected cleanly.
+  required_phrases: []
+  forbidden_phrases: []
+deployment:
+  mode: preview
+  requires_xyn_api: true
+  require_branch_isolation: false
+assertions:
+  expected_operations:
+    - campaign_create
+    - notification_rule_create
+    - campaign_notification_attach
+    - campaign_notification_invalid_ids_rejected
+  expected_entities_created:
+    - type: campaign
+    - type: notification_rule
+  expected_response_fields:
+    - path: submitRequest.endpointTarget.submitEndpoint
+      contains: "/mcp"

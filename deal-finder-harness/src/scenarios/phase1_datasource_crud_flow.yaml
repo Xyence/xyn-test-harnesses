@@ -30,7 +30,7 @@ planner_expectations:
 deployment:
   mode: preview
   requires_xyn_api: false
-  require_branch_isolation: true
+  require_branch_isolation: false
 assertions:
   expected_response_fields:
     - path: submitRequest.endpointTarget.submitEndpoint

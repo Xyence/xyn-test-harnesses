@@ -154,6 +154,49 @@ const MISSING_DEVELOPMENT_RESULT_PLANNER_CHECK: PlannerCheckResult = {
   },
 };
 
+const SKIPPED_ARTIFACT_SELECTION_CHECK: ArtifactSelectionCheckResult = {
+  passed: true,
+  details: ["Artifact selection check not required for this suite"],
+  observed: {
+    selectedArtifacts: [],
+    initialSuggestedArtifacts: [],
+    finalSelectedArtifacts: [],
+    requiredArtifacts: [],
+    forbiddenArtifacts: [],
+    optionalArtifacts: [],
+    acceptedDependencyReasons: [],
+    expectedPrimaryArtifact: "",
+    observedPrimaryArtifact: "",
+    artifactDetails: [],
+    missingRequiredArtifacts: [],
+    presentForbiddenArtifacts: [],
+    unexpectedArtifacts: [],
+    unexpectedArtifactsAllowedByDependencyReason: [],
+    unexpectedArtifactsRejected: [],
+  },
+};
+
+const SKIPPED_PLANNER_CHECK: PlannerCheckResult = {
+  passed: true,
+  details: ["Planner narrative check not required for this suite"],
+  observed: {
+    plannerText: "",
+    normalizedPlannerText: "",
+    requiredPhrases: [],
+    forbiddenPhrases: [],
+    missingRequiredPhrases: [],
+    presentForbiddenPhrases: [],
+    requestIntentKeywords: [],
+    matchedIntentKeywords: [],
+    selectedArtifacts: [],
+    missingSelectedArtifactReferences: [],
+    widenedDependencies: [],
+    widenedDependencyJustificationsMissing: [],
+    hasImplementationSteps: true,
+    hasValidationSteps: true,
+  },
+};
+
 const SKIPPED_SIBLING_CHECK: SiblingCheckResult = {
   passed: true,
   details: ["Sibling check not requested by scenario"],
@@ -217,6 +260,9 @@ const SKIPPED_TOOL_SURFACE_CHECK: ToolSurfaceCheckResult = {
     forbiddenPresent: [],
     forbiddenExecutionProbeTool: null,
     forbiddenExecutionRejected: null,
+    forbiddenExecutionStatus: null,
+    forbiddenExecutionErrorCode: null,
+    forbiddenExecutionErrorMessage: null,
   },
 };
 
@@ -310,8 +356,13 @@ export class ScenarioRunner {
         siblingUrl: mcpResult.developmentResult.siblingUrl,
       });
 
-      const artifactSelectionCheck = runArtifactSelectionCheck(scenario, mcpResult.developmentResult);
-      const plannerCheck = runPlannerCheck(scenario, mcpResult.developmentResult);
+      const shouldRunPlannerRegressionChecks = (scenario.suite ?? "planner-regression") === "planner-regression";
+      const artifactSelectionCheck = shouldRunPlannerRegressionChecks
+        ? runArtifactSelectionCheck(scenario, mcpResult.developmentResult)
+        : SKIPPED_ARTIFACT_SELECTION_CHECK;
+      const plannerCheck = shouldRunPlannerRegressionChecks
+        ? runPlannerCheck(scenario, mcpResult.developmentResult)
+        : SKIPPED_PLANNER_CHECK;
       const shouldRunSiblingCheck =
         scenario.assertions.require_sibling_metadata || scenario.deployment.require_branch_isolation;
       const shouldRunUrlCheck = scenario.assertions.require_url_check;

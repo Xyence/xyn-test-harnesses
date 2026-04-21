@@ -1,0 +1,37 @@
+id: ingest_ops_run_status_quality_file_source
+suite: deal-finder-ingest-ops
+title: "Deal Finder Ingest Ops: Run/Status/Quality For File Source"
+request: >
+  Create a file-backed St. Louis source and validate ingest trigger, status visibility, run listing,
+  and quality report presence via dedicated Deal Finder MCP tools.
+expected_artifacts:
+  - xyn-ui
+expected_primary_artifact: xyn-ui
+optional_artifacts:
+  - xyn-api
+forbidden_artifacts: []
+accepted_dependency_reasons:
+  - ui_command_requires_api_route_registration
+planner_expectations:
+  should_use_mcp: true
+  may_require_core_xyn_changes: false
+  success_criteria:
+    - Ingest trigger/status/report operations are visible through MCP.
+  required_phrases: []
+  forbidden_phrases: []
+deployment:
+  mode: preview
+  requires_xyn_api: true
+  require_branch_isolation: false
+ingestion_smoke:
+  fixture_ids:
+    - current_parcels_shapefile
+  require_quality_summary: false
+assertions:
+  expected_operations:
+    - datasource_create
+    - ingest_status_visible
+    - ingest_runs_list_visible
+  expected_response_fields:
+    - path: submitRequest.endpointTarget.submitEndpoint
+      contains: "/mcp"

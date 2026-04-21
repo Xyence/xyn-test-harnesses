@@ -61,6 +61,12 @@ const ScenarioSuiteSchema = z.enum([
   "deal-finder-mcp",
   "deal-finder-datasource-crud",
   "deal-finder-ingestion-smoke",
+  "deal-finder-campaign-lifecycle",
+  "deal-finder-notification-lifecycle",
+  "deal-finder-ingest-ops",
+  "deal-finder-campaign-notification-association",
+  "deal-finder-owner-lookup",
+  "deal-finder-condition-definitions",
 ]);
 
 export const ScenarioSchema = z.object({
