@@ -629,9 +629,10 @@ async function runDealFinderFlowActions(args: {
   }
 
   if (args.scenario.id === "mcp_add_update_datasource") {
+    const uniqueSuffix = String(Date.now());
     const createDataSource = await callMcpTool(args.config, args.token, args.sessionId, "create_data_source", {
-      key: "county-property-records",
-      name: "County Property Records",
+      key: `county-property-records-${uniqueSuffix}`,
+      name: `County Property Records ${uniqueSuffix}`,
       source_type: "generic",
       source_mode: "manual",
       refresh_cadence_seconds: 3600,
