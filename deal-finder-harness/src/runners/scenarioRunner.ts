@@ -33,6 +33,11 @@ export interface ScenarioRunResult {
     | "artifact_mismatch"
     | "blocked_scenario"
     | "entity_assertion_failure"
+    | "ingest_trigger_failure"
+    | "ingest_status_unavailable"
+    | "quality_report_missing"
+    | "source_state_transition_failure"
+    | "endpoint_targeting_failure"
     | "sibling_mismatch"
     | "url_mismatch"
     | null;
@@ -288,11 +293,13 @@ export class ScenarioRunner {
       const failureCategory = scenarioPassed
         ? null
         : classifyFailureCategory({
+            scenario,
             artifactSelectionPassed: artifactSelectionCheck.passed,
             plannerPassed: plannerCheck.passed,
             siblingPassed: siblingCheck.passed,
             urlPassed: urlCheck.passed,
             assertionPassed,
+            responseFieldCheck,
           });
 
       scenarioResults.push({
@@ -522,15 +529,22 @@ function normalizeArtifactSet(artifacts: readonly string[]): string[] {
 }
 
 function classifyFailureCategory(args: {
+  scenario: ScenarioDefinition;
   artifactSelectionPassed: boolean;
   plannerPassed: boolean;
   siblingPassed: boolean;
   urlPassed: boolean;
   assertionPassed: boolean;
+  responseFieldCheck: McpAssertionCheckResult;
 }):
   | "planner_mismatch"
   | "artifact_mismatch"
   | "entity_assertion_failure"
+  | "ingest_trigger_failure"
+  | "ingest_status_unavailable"
+  | "quality_report_missing"
+  | "source_state_transition_failure"
+  | "endpoint_targeting_failure"
   | "sibling_mismatch"
   | "url_mismatch" {
   if (!args.artifactSelectionPassed) {
@@ -549,7 +563,51 @@ function classifyFailureCategory(args: {
     return "url_mismatch";
   }
 
+  if (args.scenario.suite === "deal-finder-ingestion-smoke") {
+    const ingestionFailure = classifyIngestionAssertionFailure(args.responseFieldCheck);
+    if (ingestionFailure) {
+      return ingestionFailure;
+    }
+  }
+
   return "entity_assertion_failure";
+}
+
+function classifyIngestionAssertionFailure(
+  responseFieldCheck: McpAssertionCheckResult,
+):
+  | "ingest_trigger_failure"
+  | "ingest_status_unavailable"
+  | "quality_report_missing"
+  | "source_state_transition_failure"
+  | "endpoint_targeting_failure"
+  | null {
+  const observed = responseFieldCheck.observed ?? {};
+  const missingOperations = Array.isArray(observed.missingOperations)
+    ? observed.missingOperations.map((item) => String(item || "").toLowerCase())
+    : [];
+  const missingFields = Array.isArray(observed.missingFields)
+    ? observed.missingFields
+        .map((item) => (item && typeof item === "object" ? String((item as Record<string, unknown>).path ?? "") : ""))
+        .filter((item) => item.length > 0)
+    : [];
+
+  if (missingFields.some((path) => path.includes("endpointTarget") || path.includes("submitRequest.endpointTarget"))) {
+    return "endpoint_targeting_failure";
+  }
+  if (missingOperations.some((op) => op.includes("source_state_effect") || op.includes("source_disable_enable"))) {
+    return "source_state_transition_failure";
+  }
+  if (missingOperations.some((op) => op.includes("quality_status_summary"))) {
+    return "quality_report_missing";
+  }
+  if (missingOperations.some((op) => op.includes("ingest_status") || op.includes("lifecycle_state"))) {
+    return "ingest_status_unavailable";
+  }
+  if (missingOperations.some((op) => op.includes("ingest_request") || op.includes("ingest_trigger"))) {
+    return "ingest_trigger_failure";
+  }
+  return null;
 }
 
 function computeSuiteSummaries(results: readonly ScenarioRunResult[]): {

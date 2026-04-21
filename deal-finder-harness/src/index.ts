@@ -145,9 +145,11 @@ async function probeMcpConnectivity(args: {
     );
   }
 
-  if (indicatesMcpSse && args.submitEndpoint !== "/mcp") {
+  const submitEndpoint = String(args.submitEndpoint || "").trim().toLowerCase();
+  const isMcpProtocolEndpoint = submitEndpoint === "/mcp" || submitEndpoint.endsWith("/mcp");
+  if (indicatesMcpSse && !isMcpProtocolEndpoint) {
     throw new Error(
-      `MCP server appears to require MCP protocol at '/mcp' (SSE/JSON-RPC), but submit endpoint is configured as '${args.submitEndpoint}'. Update DEAL_FINDER_MCP_ENDPOINT_SUBMIT_REQUEST (or MCP_ENDPOINT_SUBMIT_REQUEST) to '/mcp' and add MCP protocol transport support in the harness client.`,
+      `MCP server appears to require MCP protocol transport (SSE/JSON-RPC), but submit endpoint is configured as '${args.submitEndpoint}'. Configure DEAL_FINDER_MCP_ENDPOINT_SUBMIT_REQUEST (or MCP_ENDPOINT_SUBMIT_REQUEST) to an MCP path that ends with '/mcp'.`,
     );
   }
 

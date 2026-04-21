@@ -35,7 +35,7 @@ const RawEnvSchema = z
     ARTIFACTS_DIR: z.string().default("./artifacts"),
     HARNESS_SCENARIO_ID: z.string().min(1).default("mcp_create_campaign"),
     HARNESS_SCENARIO_SUITE: z
-      .enum(["all", "planner-regression", "deal-finder-mcp", "deal-finder-datasource-crud"])
+      .enum(["all", "planner-regression", "deal-finder-mcp", "deal-finder-datasource-crud", "deal-finder-ingestion-smoke"])
       .default("all"),
   })
   .superRefine((value, ctx) => {

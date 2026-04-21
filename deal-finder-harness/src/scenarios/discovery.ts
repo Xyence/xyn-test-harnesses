@@ -51,8 +51,16 @@ function inferScenarioSuite(scenarioId: string): ScenarioSuite {
     "mcp_add_update_datasource",
     "mcp_create_update_notification_rule",
   ]);
+  const dealFinderDataSourceCrudPrefix = "dscrud_";
+  const dealFinderIngestionPrefix = "dsi_";
   if (dealFinderMcpScenarioIds.has(id)) {
     return "deal-finder-mcp";
+  }
+  if (id.startsWith(dealFinderDataSourceCrudPrefix)) {
+    return "deal-finder-datasource-crud";
+  }
+  if (id.startsWith(dealFinderIngestionPrefix)) {
+    return "deal-finder-ingestion-smoke";
   }
   return "planner-regression";
 }

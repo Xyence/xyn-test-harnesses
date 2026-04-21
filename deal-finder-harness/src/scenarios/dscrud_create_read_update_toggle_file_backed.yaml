@@ -46,4 +46,4 @@ assertions:
       name_contains: st. louis
   expected_response_fields:
     - path: submitRequest.endpointTarget.submitEndpoint
-      equals: "/mcp"
+      contains: "/mcp"

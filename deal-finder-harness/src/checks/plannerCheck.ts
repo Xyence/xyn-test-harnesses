@@ -94,7 +94,7 @@ export function runPlannerCheck(
 
   const selectedArtifacts = developmentResult.selectedArtifacts;
   const missingSelectedArtifactReferences =
-    scenario.suite === "deal-finder-datasource-crud"
+    scenario.suite === "deal-finder-datasource-crud" || scenario.suite === "deal-finder-ingestion-smoke"
       ? []
       : selectedArtifacts.filter((artifact) => !matchesArtifactReference(normalizedPlannerText, artifact));
 

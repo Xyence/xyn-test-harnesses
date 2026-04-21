@@ -209,7 +209,7 @@ export async function submitDevelopmentRequest(
 ): Promise<DevelopmentRequestResult> {
   const endpoints = resolveEndpoints(config.endpoints);
 
-  if (endpoints.submitRequest === "/mcp") {
+  if (isMcpProtocolEndpoint(endpoints.submitRequest)) {
     return submitDevelopmentRequestViaMcpProtocol(config, scenario);
   }
 
@@ -396,12 +396,13 @@ async function submitDevelopmentRequestViaMcpProtocol(
   config: McpDevelopmentConfig,
   scenario: ScenarioDefinition,
 ): Promise<DevelopmentRequestResult> {
+  const mcpEndpointPath = getMcpProtocolEndpointPath(config);
   const token = await config.authTokenProvider();
   let lastError: unknown = null;
   const maxAttempts = 4;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
-      const init = await initializeMcpSession(config, token);
+      const init = await initializeMcpSession(config, token, mcpEndpointPath);
       const listApplications = await callMcpTool(config, token, init.sessionId, "list_applications", {});
       const applicationId = extractFirstString(listApplications, [["response", "applications", "0", "id"]]);
       if (!applicationId) {
@@ -455,7 +456,11 @@ async function submitDevelopmentRequestViaMcpProtocol(
       }
 
       let dealFinderFlowActions: unknown = null;
-      if (scenario.suite === "deal-finder-mcp" || scenario.suite === "deal-finder-datasource-crud") {
+      if (
+        scenario.suite === "deal-finder-mcp" ||
+        scenario.suite === "deal-finder-datasource-crud" ||
+        scenario.suite === "deal-finder-ingestion-smoke"
+      ) {
         const workspaceId =
           extractFirstString(createSession, [["response", "raw", "session", "workspace_id"]]) ??
           extractFirstString(sessionPlan, [["response", "raw", "session", "workspace_id"]]) ??
@@ -463,9 +468,11 @@ async function submitDevelopmentRequestViaMcpProtocol(
         dealFinderFlowActions = await runDealFinderFlowActions({
           config,
           token,
-          sessionId: init.sessionId,
+          mcpSessionId: init.sessionId,
           scenario,
           workspaceId,
+          applicationId,
+          changeSessionId: sessionId,
         });
       }
 
@@ -473,7 +480,7 @@ async function submitDevelopmentRequestViaMcpProtocol(
         submitRequest: {
           endpointTarget: {
             baseUrl: config.baseUrl,
-            submitEndpoint: "/mcp",
+            submitEndpoint: mcpEndpointPath,
           },
           mcpInitialize: init.responseBody,
           listApplications,
@@ -602,9 +609,11 @@ async function submitDevelopmentRequestViaMcpProtocol(
 async function runDealFinderFlowActions(args: {
   config: McpDevelopmentConfig;
   token: string;
-  sessionId: string;
+  mcpSessionId: string;
   scenario: ScenarioDefinition;
   workspaceId: string;
+  applicationId: string;
+  changeSessionId: string;
 }): Promise<Record<string, unknown>> {
   const workspaceId = String(args.workspaceId || "").trim();
   if (!workspaceId) {
@@ -613,7 +622,7 @@ async function runDealFinderFlowActions(args: {
   const runSuffix = `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
   if (args.scenario.id === "mcp_create_campaign") {
-    const createCampaign = await callMcpTool(args.config, args.token, args.sessionId, "create_campaign", {
+    const createCampaign = await callMcpTool(args.config, args.token, args.mcpSessionId, "create_campaign", {
       workspace_id: workspaceId,
       name: "Q2 Retail Expansion Campaign",
       campaign_type: "generic",
@@ -632,7 +641,7 @@ async function runDealFinderFlowActions(args: {
 
   if (args.scenario.id === "mcp_add_update_datasource") {
     const uniqueSuffix = runSuffix;
-    const createDataSource = await callMcpTool(args.config, args.token, args.sessionId, "create_data_source", {
+    const createDataSource = await callMcpTool(args.config, args.token, args.mcpSessionId, "create_data_source", {
       key: `county-property-records-${uniqueSuffix}`,
       name: `County Property Records ${uniqueSuffix}`,
       source_type: "generic",
@@ -646,7 +655,7 @@ async function runDealFinderFlowActions(args: {
     if (!sourceId) {
       throw new Error(`create_data_source returned no source id; raw=${safeStringify(createDataSource)}`);
     }
-    const updateDataSource = await callMcpTool(args.config, args.token, args.sessionId, "update_data_source", {
+    const updateDataSource = await callMcpTool(args.config, args.token, args.mcpSessionId, "update_data_source", {
       source_id: sourceId,
       payload: {
         refresh_cadence_seconds: 86400,
@@ -672,7 +681,7 @@ async function runDealFinderFlowActions(args: {
 
   if (args.scenario.id === "mcp_create_update_notification_rule") {
     const uniqueAddress = `alerts+deal-finder-${runSuffix}@xyence.io`;
-    const createNotificationRule = await callMcpTool(args.config, args.token, args.sessionId, "create_notification_rule", {
+    const createNotificationRule = await callMcpTool(args.config, args.token, args.mcpSessionId, "create_notification_rule", {
       workspace_id: workspaceId,
       address: uniqueAddress,
       channel: "slack",
@@ -686,7 +695,7 @@ async function runDealFinderFlowActions(args: {
     if (!targetId) {
       throw new Error(`create_notification_rule returned no target id; raw=${safeStringify(createNotificationRule)}`);
     }
-    const updateNotificationRule = await callMcpTool(args.config, args.token, args.sessionId, "update_notification_rule", {
+    const updateNotificationRule = await callMcpTool(args.config, args.token, args.mcpSessionId, "update_notification_rule", {
       target_id: targetId,
       workspace_id: workspaceId,
       enabled: true,
@@ -802,7 +811,7 @@ async function runDealFinderFlowActions(args: {
       const fixture = stLouisFixture(configuredFixtureId);
       const sourceKey = `${fixture.baseKey}-${runSuffix}`;
       const sourceName = `${fixture.baseName} ${runSuffix}`;
-      const createDataSource = await callMcpTool(args.config, args.token, args.sessionId, "create_data_source", {
+      const createDataSource = await callMcpTool(args.config, args.token, args.mcpSessionId, "create_data_source", {
         key: sourceKey,
         name: sourceName,
         source_type: fixture.sourceType,
@@ -813,7 +822,7 @@ async function runDealFinderFlowActions(args: {
           metadata: fixture.metadata,
         },
       });
-      const duplicateAttempt = await callMcpToolAllowFailure(args.config, args.token, args.sessionId, "create_data_source", {
+      const duplicateAttempt = await callMcpToolAllowFailure(args.config, args.token, args.mcpSessionId, "create_data_source", {
         key: sourceKey,
         name: `${sourceName} duplicate`,
         source_type: fixture.sourceType,
@@ -824,7 +833,7 @@ async function runDealFinderFlowActions(args: {
           metadata: fixture.metadata,
         },
       });
-      const invalidAttempt = await callMcpToolAllowFailure(args.config, args.token, args.sessionId, "create_data_source", {
+      const invalidAttempt = await callMcpToolAllowFailure(args.config, args.token, args.mcpSessionId, "create_data_source", {
         key: `${sourceKey}-invalid`,
         name: `${sourceName} invalid`,
         source_type: fixture.sourceType,
@@ -873,13 +882,35 @@ async function runDealFinderFlowActions(args: {
     }
   }
 
+  if (args.scenario.suite === "deal-finder-ingestion-smoke") {
+    const fixtureId =
+      args.scenario.ingestion_smoke?.fixture_ids && args.scenario.ingestion_smoke.fixture_ids.length > 0
+        ? args.scenario.ingestion_smoke.fixture_ids[0]
+        : args.scenario.id.includes("service")
+          ? "csb_service_requests"
+          : "current_parcels_shapefile";
+    const fixture = stLouisFixture(fixtureId);
+    return await runStLouisIngestionSmokeFlow({
+      config: args.config,
+      token: args.token,
+      mcpSessionId: args.mcpSessionId,
+      fixture,
+      workspaceId,
+      applicationId: args.applicationId,
+      changeSessionId: args.changeSessionId,
+      runSuffix: `${runSuffix}-${fixture.fixtureId}`,
+      requireQualitySummary: Boolean(args.scenario.ingestion_smoke?.require_quality_summary),
+      verifyDisableEnableEffect: Boolean(args.scenario.ingestion_smoke?.verify_disable_enable_effect ?? true),
+    });
+  }
+
   return { operation: "none", note: "No Deal Finder flow action defined for this scenario" };
 }
 
 async function runStLouisDataSourceCrudFlow(args: {
   config: McpDevelopmentConfig;
   token: string;
-  sessionId: string;
+  mcpSessionId: string;
   fixture: StLouisSourceFixture;
   workspaceId: string;
   runSuffix: string;
@@ -889,7 +920,7 @@ async function runStLouisDataSourceCrudFlow(args: {
 }): Promise<Record<string, unknown>> {
   const sourceKey = `${args.fixture.baseKey}-${args.runSuffix}`;
   const sourceName = `${args.fixture.baseName} ${args.runSuffix}`;
-  const createDataSource = await callMcpTool(args.config, args.token, args.sessionId, "create_data_source", {
+  const createDataSource = await callMcpTool(args.config, args.token, args.mcpSessionId, "create_data_source", {
     key: sourceKey,
     name: sourceName,
     source_type: args.fixture.sourceType,
@@ -912,14 +943,14 @@ async function runStLouisDataSourceCrudFlow(args: {
     throw new Error(`create_data_source returned no source id; raw=${safeStringify(createDataSource)}`);
   }
 
-  const getDataSource = await callMcpTool(args.config, args.token, args.sessionId, "get_data_source", {
+  const getDataSource = await callMcpTool(args.config, args.token, args.mcpSessionId, "get_data_source", {
     source_id: sourceId,
     workspace_id: args.workspaceId,
   });
-  const listDataSources = await callMcpTool(args.config, args.token, args.sessionId, "list_data_sources", {
+  const listDataSources = await callMcpTool(args.config, args.token, args.mcpSessionId, "list_data_sources", {
     workspace_id: args.workspaceId,
   });
-  const updateDataSource = await callMcpTool(args.config, args.token, args.sessionId, "update_data_source", {
+  const updateDataSource = await callMcpTool(args.config, args.token, args.mcpSessionId, "update_data_source", {
     source_id: sourceId,
     workspace_id: args.workspaceId,
     payload: {
@@ -942,11 +973,11 @@ async function runStLouisDataSourceCrudFlow(args: {
 
   if (args.includeToggle) {
     operations.push("datasource_toggle_checked");
-    const pauseDataSource = await callMcpToolAllowFailure(args.config, args.token, args.sessionId, "pause_data_source", {
+    const pauseDataSource = await callMcpToolAllowFailure(args.config, args.token, args.mcpSessionId, "pause_data_source", {
       source_id: sourceId,
       workspace_id: args.workspaceId,
     });
-    const activateDataSource = await callMcpToolAllowFailure(args.config, args.token, args.sessionId, "activate_data_source", {
+    const activateDataSource = await callMcpToolAllowFailure(args.config, args.token, args.mcpSessionId, "activate_data_source", {
       source_id: sourceId,
       workspace_id: args.workspaceId,
     });
@@ -962,7 +993,7 @@ async function runStLouisDataSourceCrudFlow(args: {
 
   if (args.includeDeleteAttempt) {
     operations.push("datasource_delete_attempted");
-    const deleteDataSource = await callMcpToolAllowFailure(args.config, args.token, args.sessionId, "delete_data_source", {
+    const deleteDataSource = await callMcpToolAllowFailure(args.config, args.token, args.mcpSessionId, "delete_data_source", {
       source_id: sourceId,
       workspace_id: args.workspaceId,
     });
@@ -972,7 +1003,7 @@ async function runStLouisDataSourceCrudFlow(args: {
     } else {
       operations.push("datasource_delete_unsupported");
     }
-    const recreateDataSource = await callMcpTool(args.config, args.token, args.sessionId, "create_data_source", {
+    const recreateDataSource = await callMcpTool(args.config, args.token, args.mcpSessionId, "create_data_source", {
       key: `${sourceKey}-recreate`,
       name: `${sourceName} Recreate`,
       source_type: args.fixture.sourceType,
@@ -992,7 +1023,7 @@ async function runStLouisDataSourceCrudFlow(args: {
 
   if (args.includeIngestSmoke) {
     operations.push("datasource_ingest_smoke_checked");
-    const refreshDataSource = await callMcpToolAllowFailure(args.config, args.token, args.sessionId, "refresh_data_source", {
+    const refreshDataSource = await callMcpToolAllowFailure(args.config, args.token, args.mcpSessionId, "refresh_data_source", {
       source_id: sourceId,
       workspace_id: args.workspaceId,
     });
@@ -1006,6 +1037,199 @@ async function runStLouisDataSourceCrudFlow(args: {
 
   return {
     suite: "deal-finder-datasource-crud",
+    operations: dedupeStrings(operations),
+    entities: [
+      {
+        type: "datasource",
+        id: sourceId,
+        key: sourceKey,
+        name: sourceName,
+        fixture_id: args.fixture.fixtureId,
+      },
+    ],
+    raw,
+  };
+}
+
+async function runStLouisIngestionSmokeFlow(args: {
+  config: McpDevelopmentConfig;
+  token: string;
+  mcpSessionId: string;
+  fixture: StLouisSourceFixture;
+  workspaceId: string;
+  applicationId: string;
+  changeSessionId: string;
+  runSuffix: string;
+  requireQualitySummary: boolean;
+  verifyDisableEnableEffect: boolean;
+}): Promise<Record<string, unknown>> {
+  const sourceKey = `${args.fixture.baseKey}-${args.runSuffix}`;
+  const sourceName = `${args.fixture.baseName} ${args.runSuffix}`;
+  const operations: string[] = ["ingest_probe_started"];
+  const raw: Record<string, unknown> = { fixture: args.fixture };
+
+  const createDataSource = await callMcpTool(args.config, args.token, args.mcpSessionId, "create_data_source", {
+    key: sourceKey,
+    name: sourceName,
+    source_type: args.fixture.sourceType,
+    source_mode: args.fixture.sourceMode,
+    refresh_cadence_seconds: args.fixture.refreshCadenceSeconds,
+    payload: {
+      configuration: args.fixture.configuration,
+      metadata: {
+        ...args.fixture.metadata,
+        parser_kind: args.fixture.parserKind,
+        location_url: args.fixture.locationUrl,
+      },
+    },
+  });
+  raw.createDataSource = createDataSource;
+  operations.push("datasource_create");
+
+  const sourceId =
+    extractFirstString(createDataSource, [["response", "data_source", "id"]]) ??
+    extractFirstString(createDataSource, [["response", "source_connector", "id"]]) ??
+    extractFirstString(createDataSource, [["data_source", "id"]]);
+  if (!sourceId) {
+    throw new Error(`create_data_source returned no source id; raw=${safeStringify(createDataSource)}`);
+  }
+
+  const initialTrigger = await callMcpToolAllowFailure(args.config, args.token, args.mcpSessionId, "refresh_data_source", {
+    source_id: sourceId,
+    workspace_id: args.workspaceId,
+  });
+  raw.refreshDataSource = initialTrigger;
+  operations.push("ingest_trigger_attempted");
+  if (initialTrigger.ok) {
+    operations.push("ingest_request_accepted");
+  } else {
+    operations.push("ingest_trigger_capability_missing");
+  }
+  operations.push("ingest_trigger_result_recorded");
+
+  const listRuns = await callMcpToolAllowFailure(args.config, args.token, args.mcpSessionId, "list_runtime_runs", {
+    application_id: args.applicationId,
+    session_id: args.changeSessionId,
+    limit: 20,
+  });
+  raw.listRuntimeRuns = listRuns;
+  operations.push("ingest_status_probe_attempted");
+
+  let firstRunId = "";
+  if (listRuns.ok) {
+    operations.push("ingest_status_visible");
+    const rows =
+      extractObjectArray(getByPath(listRuns.result, ["response", "runtime_runs"])) ??
+      extractObjectArray(getByPath(listRuns.result, ["runtime_runs"])) ??
+      [];
+    firstRunId =
+      (rows[0] && typeof rows[0].id === "string" ? String(rows[0].id) : "") ||
+      extractFirstString(listRuns.result, [["response", "runtime_runs", "0", "id"], ["runtime_runs", "0", "id"]]) ||
+      "";
+    if (rows.some((row) => typeof row.status === "string" && String(row.status).trim().length > 0)) {
+      operations.push("ingest_lifecycle_state_observed");
+    }
+  } else {
+    operations.push("ingest_status_unavailable");
+  }
+  operations.push("ingest_status_result_recorded");
+
+  if (firstRunId) {
+    const getRun = await callMcpToolAllowFailure(args.config, args.token, args.mcpSessionId, "get_runtime_run", {
+      run_id: firstRunId,
+      application_id: args.applicationId,
+      session_id: args.changeSessionId,
+    });
+    raw.getRuntimeRun = getRun;
+
+    const getArtifacts = await callMcpToolAllowFailure(
+      args.config,
+      args.token,
+      args.mcpSessionId,
+      "get_runtime_run_artifacts",
+      {
+        run_id: firstRunId,
+        application_id: args.applicationId,
+        session_id: args.changeSessionId,
+      },
+    );
+    raw.getRuntimeRunArtifacts = getArtifacts;
+    if (getArtifacts.ok) {
+      const artifacts =
+        extractObjectArray(getByPath(getArtifacts.result, ["response", "artifacts"])) ??
+        extractObjectArray(getByPath(getArtifacts.result, ["artifacts"])) ??
+        [];
+      const hasQualityLike = artifacts.some((row) => {
+        const key = `${String(row.name ?? "")} ${String(row.kind ?? "")}`.toLowerCase();
+        return key.includes("quality") || key.includes("summary") || key.includes("status") || key.includes("report");
+      });
+      if (hasQualityLike) {
+        operations.push("quality_status_summary_present");
+      } else if (args.requireQualitySummary) {
+        operations.push("quality_status_summary_missing");
+      }
+    }
+  } else if (args.requireQualitySummary) {
+    operations.push("quality_status_summary_missing");
+  }
+  operations.push("quality_status_probe_completed");
+
+  if (args.verifyDisableEnableEffect) {
+    const pauseDataSource = await callMcpToolAllowFailure(args.config, args.token, args.mcpSessionId, "pause_data_source", {
+      source_id: sourceId,
+      workspace_id: args.workspaceId,
+    });
+    raw.pauseDataSource = pauseDataSource;
+    const whilePausedTrigger = await callMcpToolAllowFailure(
+      args.config,
+      args.token,
+      args.mcpSessionId,
+      "refresh_data_source",
+      {
+        source_id: sourceId,
+        workspace_id: args.workspaceId,
+      },
+    );
+    raw.refreshWhilePaused = whilePausedTrigger;
+    const activateDataSource = await callMcpToolAllowFailure(
+      args.config,
+      args.token,
+      args.mcpSessionId,
+      "activate_data_source",
+      {
+        source_id: sourceId,
+        workspace_id: args.workspaceId,
+      },
+    );
+    raw.activateDataSource = activateDataSource;
+    const afterEnableTrigger = await callMcpToolAllowFailure(
+      args.config,
+      args.token,
+      args.mcpSessionId,
+      "refresh_data_source",
+      {
+        source_id: sourceId,
+        workspace_id: args.workspaceId,
+      },
+    );
+    raw.refreshAfterEnable = afterEnableTrigger;
+    operations.push("source_state_transition_checked");
+    if (pauseDataSource.ok && activateDataSource.ok) {
+      operations.push("source_disable_enable_applied");
+    } else {
+      operations.push("source_state_transition_failure");
+    }
+    if (!whilePausedTrigger.ok && afterEnableTrigger.ok) {
+      operations.push("source_state_effect_observed");
+    } else if (!whilePausedTrigger.ok && !afterEnableTrigger.ok) {
+      operations.push("ingest_trigger_capability_missing");
+      operations.push("source_state_effect_unavailable");
+    }
+  }
+
+  operations.push("ingest_probe_completed");
+  return {
+    suite: "deal-finder-ingestion-smoke",
     operations: dedupeStrings(operations),
     entities: [
       {
@@ -1086,11 +1310,22 @@ function sleep(ms: number): Promise<void> {
   });
 }
 
+function isMcpProtocolEndpoint(path: string): boolean {
+  const normalized = String(path || "").trim().toLowerCase();
+  return normalized === "/mcp" || normalized.endsWith("/mcp");
+}
+
+function getMcpProtocolEndpointPath(config: McpDevelopmentConfig): string {
+  const endpoints = resolveEndpoints(config.endpoints);
+  return isMcpProtocolEndpoint(endpoints.submitRequest) ? endpoints.submitRequest : "/mcp";
+}
+
 async function initializeMcpSession(
   config: McpDevelopmentConfig,
   token: string,
+  endpointPath?: string,
 ): Promise<McpSessionInitResult> {
-  const endpoint = "/mcp";
+  const endpoint = endpointPath ?? getMcpProtocolEndpointPath(config);
   const url = new URL(endpoint, config.baseUrl).toString();
   const response = await fetch(url, {
     method: "POST",
@@ -1141,8 +1376,9 @@ async function callMcpTool(
   sessionId: string,
   toolName: string,
   args: Record<string, unknown>,
+  endpointPath?: string,
 ): Promise<Record<string, unknown>> {
-  const endpoint = "/mcp";
+  const endpoint = endpointPath ?? getMcpProtocolEndpointPath(config);
   const url = new URL(endpoint, config.baseUrl).toString();
   const requestId = `tool-${toolName}-${Date.now()}`;
 

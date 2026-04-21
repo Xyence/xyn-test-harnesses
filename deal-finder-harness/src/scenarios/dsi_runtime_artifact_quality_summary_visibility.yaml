@@ -1,0 +1,45 @@
+id: dsi_runtime_artifact_quality_summary_visibility
+suite: deal-finder-ingestion-smoke
+title: "Deal Finder Ingestion Smoke: Runtime Artifact/Quality Summary Visibility"
+request: >
+  Run a Deal Finder ingestion observability smoke check and confirm runtime run artifacts or
+  status summary surfaces are discoverable through MCP when present.
+expected_artifacts:
+  - xyn-api
+expected_primary_artifact: xyn-api
+optional_artifacts:
+  - xyn-ui
+forbidden_artifacts: []
+accepted_dependency_reasons:
+  - ui_command_requires_api_route_registration
+planner_expectations:
+  should_use_mcp: true
+  may_require_core_xyn_changes: false
+  success_criteria:
+    - Planner includes runtime run artifact/status summary visibility checks.
+  required_phrases:
+    - runtime
+    - artifact
+    - status
+  forbidden_phrases: []
+deployment:
+  mode: preview
+  requires_xyn_api: true
+  require_branch_isolation: false
+ingestion_smoke:
+  fixture_ids:
+    - building_permits_mdb
+  require_ingest_trigger: false
+  require_status_visibility: true
+  require_quality_summary: false
+  verify_disable_enable_effect: false
+assertions:
+  expected_operations:
+    - datasource_create
+    - ingest_status_probe_attempted
+    - ingest_status_result_recorded
+    - quality_status_probe_completed
+    - ingest_probe_completed
+  expected_response_fields:
+    - path: submitRequest.endpointTarget.submitEndpoint
+      contains: "/mcp"

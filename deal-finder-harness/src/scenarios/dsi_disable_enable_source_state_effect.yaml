@@ -1,0 +1,42 @@
+id: dsi_disable_enable_source_state_effect
+suite: deal-finder-ingestion-smoke
+title: "Deal Finder Ingestion Smoke: Disable/Enable Source State Transition Effect"
+request: >
+  Configure a St. Louis source, pause it, verify ingest behavior while paused, re-enable it,
+  and verify the source state transition is observable through MCP responses.
+expected_artifacts:
+  - xyn-api
+expected_primary_artifact: xyn-api
+optional_artifacts:
+  - xyn-ui
+forbidden_artifacts: []
+accepted_dependency_reasons:
+  - ui_command_requires_api_route_registration
+planner_expectations:
+  should_use_mcp: true
+  may_require_core_xyn_changes: false
+  success_criteria:
+    - Planner includes source disable/enable transition checks around ingest behavior.
+  required_phrases:
+    - enable
+    - source
+  forbidden_phrases: []
+deployment:
+  mode: preview
+  requires_xyn_api: true
+  require_branch_isolation: false
+ingestion_smoke:
+  fixture_ids:
+    - inspections_mdb
+  require_ingest_trigger: false
+  require_status_visibility: true
+  require_quality_summary: false
+  verify_disable_enable_effect: true
+assertions:
+  expected_operations:
+    - datasource_create
+    - source_state_transition_checked
+    - ingest_probe_completed
+  expected_response_fields:
+    - path: submitRequest.endpointTarget.submitEndpoint
+      contains: "/mcp"

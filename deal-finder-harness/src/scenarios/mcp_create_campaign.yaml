@@ -35,4 +35,4 @@ assertions:
   expected_response_fields:
     - path: plannerOutput.response.current_status
     - path: submitRequest.endpointTarget.submitEndpoint
-      equals: "/mcp"
+      contains: "/mcp"

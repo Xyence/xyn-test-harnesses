@@ -36,4 +36,4 @@ assertions:
     - datasource_invalid_config_rejected
   expected_response_fields:
     - path: submitRequest.endpointTarget.submitEndpoint
-      equals: "/mcp"
+      contains: "/mcp"

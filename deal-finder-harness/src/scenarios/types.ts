@@ -38,6 +38,14 @@ const DataSourceCrudConfigSchema = z.object({
   include_ingest_smoke: z.boolean().default(false),
 });
 
+const IngestionSmokeConfigSchema = z.object({
+  fixture_ids: z.array(z.string().min(1)).default([]),
+  require_ingest_trigger: z.boolean().default(false),
+  require_status_visibility: z.boolean().default(true),
+  require_quality_summary: z.boolean().default(false),
+  verify_disable_enable_effect: z.boolean().default(true),
+});
+
 const McpAssertionsSchema = z.object({
   expected_operations: z.array(z.string().min(1)).default([]),
   expected_entities_created: z.array(ExpectedEntitySchema).default([]),
@@ -48,7 +56,12 @@ const McpAssertionsSchema = z.object({
   require_url_check: z.boolean().default(false),
 });
 
-const ScenarioSuiteSchema = z.enum(["planner-regression", "deal-finder-mcp", "deal-finder-datasource-crud"]);
+const ScenarioSuiteSchema = z.enum([
+  "planner-regression",
+  "deal-finder-mcp",
+  "deal-finder-datasource-crud",
+  "deal-finder-ingestion-smoke",
+]);
 
 export const ScenarioSchema = z.object({
   id: z.string().min(1),
@@ -67,6 +80,7 @@ export const ScenarioSchema = z.object({
   planner_expectations: PlannerExpectationsSchema,
   deployment: DeploymentSchema,
   datasource_crud: DataSourceCrudConfigSchema.optional(),
+  ingestion_smoke: IngestionSmokeConfigSchema.optional(),
   assertions: McpAssertionsSchema.default(() => ({
     expected_operations: [],
     expected_entities_created: [],

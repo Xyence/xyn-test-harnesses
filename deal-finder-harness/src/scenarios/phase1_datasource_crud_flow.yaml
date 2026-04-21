@@ -34,7 +34,7 @@ deployment:
 assertions:
   expected_response_fields:
     - path: submitRequest.endpointTarget.submitEndpoint
-      equals: "/mcp"
+      contains: "/mcp"
 ui_checks:
   - type: command_palette_command_present
     command_text: "Create data source"

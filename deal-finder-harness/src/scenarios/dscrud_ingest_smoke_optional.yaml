@@ -37,4 +37,4 @@ assertions:
     - datasource_ingest_smoke_checked
   expected_response_fields:
     - path: submitRequest.endpointTarget.submitEndpoint
-      equals: "/mcp"
+      contains: "/mcp"

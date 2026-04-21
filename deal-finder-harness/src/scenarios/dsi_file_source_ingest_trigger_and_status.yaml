@@ -1,0 +1,47 @@
+id: dsi_file_source_ingest_trigger_and_status
+suite: deal-finder-ingestion-smoke
+title: "Deal Finder Ingestion Smoke: File-Backed Source Trigger And Status"
+request: >
+  Configure a St. Louis file-backed source and validate ingestion orchestration visibility:
+  attempt ingest trigger, then verify runtime run status observability through MCP.
+expected_artifacts:
+  - xyn-ui
+expected_primary_artifact: xyn-ui
+optional_artifacts:
+  - xyn-api
+forbidden_artifacts: []
+accepted_dependency_reasons:
+  - ui_command_requires_api_route_registration
+planner_expectations:
+  should_use_mcp: true
+  may_require_core_xyn_changes: false
+  success_criteria:
+    - Planner includes ingestion trigger and status visibility checks.
+  required_phrases:
+    - ingest
+    - source
+  forbidden_phrases: []
+deployment:
+  mode: preview
+  requires_xyn_api: true
+  require_branch_isolation: false
+ingestion_smoke:
+  fixture_ids:
+    - current_parcels_shapefile
+  require_ingest_trigger: false
+  require_status_visibility: true
+  require_quality_summary: false
+  verify_disable_enable_effect: false
+assertions:
+  expected_operations:
+    - datasource_create
+    - ingest_probe_started
+    - ingest_trigger_attempted
+    - ingest_trigger_result_recorded
+    - ingest_status_probe_attempted
+    - ingest_status_result_recorded
+    - quality_status_probe_completed
+    - ingest_probe_completed
+  expected_response_fields:
+    - path: submitRequest.endpointTarget.submitEndpoint
+      contains: "/mcp"
