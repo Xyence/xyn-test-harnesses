@@ -16,6 +16,11 @@ import { runDataSourceMcpCheck } from "../checks/dataSourceMcpCheck";
 import { runNotificationMcpCheck } from "../checks/notificationMcpCheck";
 import { runResponseFieldCheck } from "../checks/responseFieldCheck";
 import type { McpAssertionCheckResult } from "../checks/mcpAssertionTypes";
+import {
+  runRuntimeIdentityCheck,
+  type RuntimeIdentityCheckResult,
+  type RuntimeIdentityExpectation,
+} from "../checks/runtimeIdentityCheck";
 import type { ScenarioDefinition } from "../scenarios/types";
 
 export interface ScenarioRunResult {
@@ -38,6 +43,7 @@ export interface ScenarioRunResult {
     | "quality_report_missing"
     | "source_state_transition_failure"
     | "endpoint_targeting_failure"
+    | "runtime_identity_mismatch"
     | "sibling_mismatch"
     | "url_mismatch"
     | null;
@@ -51,6 +57,7 @@ export interface ScenarioRunResult {
     readonly notification: McpAssertionCheckResult;
     readonly responseField: McpAssertionCheckResult;
   };
+  readonly runtimeIdentityCheck: RuntimeIdentityCheckResult;
 }
 
 export interface ArtifactSelectionDifferenceViolation {
@@ -98,6 +105,7 @@ interface ScenarioRunnerDependencies {
   readonly mcpClient: McpClient;
   readonly configuredTokenMode: "access_token" | "id_token";
   readonly artifactsDir: string;
+  readonly runtimeIdentityExpectation: RuntimeIdentityExpectation;
 }
 
 const MISSING_DEVELOPMENT_RESULT_ARTIFACT_CHECK: ArtifactSelectionCheckResult = {
@@ -176,6 +184,22 @@ const EMPTY_ASSERTION_CHECK: McpAssertionCheckResult = {
   observed: {},
 };
 
+const SKIPPED_RUNTIME_IDENTITY_CHECK: RuntimeIdentityCheckResult = {
+  passed: true,
+  details: ["Runtime identity check not required for this scenario"],
+  observed: {
+    expectedAppScope: null,
+    expectedEnvironment: null,
+    appScope: null,
+    environment: null,
+    deploymentId: null,
+    buildSha: null,
+    imageTag: null,
+    healthBindingName: null,
+    metadataBindingName: null,
+  },
+};
+
 export class ScenarioRunner {
   constructor(private readonly deps: ScenarioRunnerDependencies) {}
 
@@ -218,6 +242,7 @@ export class ScenarioRunner {
             notification: EMPTY_ASSERTION_CHECK,
             responseField: EMPTY_ASSERTION_CHECK,
           },
+          runtimeIdentityCheck: SKIPPED_RUNTIME_IDENTITY_CHECK,
         });
         continue;
       }
@@ -248,6 +273,7 @@ export class ScenarioRunner {
             notification: EMPTY_ASSERTION_CHECK,
             responseField: EMPTY_ASSERTION_CHECK,
           },
+          runtimeIdentityCheck: SKIPPED_RUNTIME_IDENTITY_CHECK,
         });
         continue;
       }
@@ -279,9 +305,18 @@ export class ScenarioRunner {
       const dataSourceCheck = runDataSourceMcpCheck(scenario, mcpResult.developmentResult);
       const notificationCheck = runNotificationMcpCheck(scenario, mcpResult.developmentResult);
       const responseFieldCheck = runResponseFieldCheck(scenario, mcpResult.developmentResult);
+      const runtimeIdentityCheck = runRuntimeIdentityCheck(
+        scenario,
+        mcpResult.developmentResult,
+        this.deps.runtimeIdentityExpectation,
+      );
 
       const assertionPassed =
-        campaignCheck.passed && dataSourceCheck.passed && notificationCheck.passed && responseFieldCheck.passed;
+        campaignCheck.passed &&
+        dataSourceCheck.passed &&
+        notificationCheck.passed &&
+        responseFieldCheck.passed &&
+        runtimeIdentityCheck.passed;
 
       const scenarioPassed =
         artifactSelectionCheck.passed &&
@@ -300,6 +335,7 @@ export class ScenarioRunner {
             urlPassed: urlCheck.passed,
             assertionPassed,
             responseFieldCheck,
+            runtimeIdentityPassed: runtimeIdentityCheck.passed,
           });
 
       scenarioResults.push({
@@ -322,6 +358,7 @@ export class ScenarioRunner {
           notification: notificationCheck,
           responseField: responseFieldCheck,
         },
+        runtimeIdentityCheck,
       });
     }
 
@@ -536,6 +573,7 @@ function classifyFailureCategory(args: {
   urlPassed: boolean;
   assertionPassed: boolean;
   responseFieldCheck: McpAssertionCheckResult;
+  runtimeIdentityPassed: boolean;
 }):
   | "planner_mismatch"
   | "artifact_mismatch"
@@ -545,6 +583,7 @@ function classifyFailureCategory(args: {
   | "quality_report_missing"
   | "source_state_transition_failure"
   | "endpoint_targeting_failure"
+  | "runtime_identity_mismatch"
   | "sibling_mismatch"
   | "url_mismatch" {
   if (!args.artifactSelectionPassed) {
@@ -568,6 +607,10 @@ function classifyFailureCategory(args: {
     if (ingestionFailure) {
       return ingestionFailure;
     }
+  }
+
+  if (!args.runtimeIdentityPassed) {
+    return "runtime_identity_mismatch";
   }
 
   return "entity_assertion_failure";

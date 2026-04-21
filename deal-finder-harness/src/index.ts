@@ -26,6 +26,7 @@ async function main(): Promise<void> {
     targetSubmitEndpoint: env.mcpTarget.submitRequestEndpoint,
     targetHealthEndpoint: env.mcpTarget.healthEndpoint,
     configuredAudience: env.mcpTarget.audience,
+    runtimeIdentityExpectation: env.mcpTarget.runtimeIdentityExpectation,
   });
 
   await probeMcpConnectivity({
@@ -73,6 +74,7 @@ async function main(): Promise<void> {
     mcpClient,
     configuredTokenMode: env.MCP_AUTH_TOKEN_MODE,
     artifactsDir: env.ARTIFACTS_DIR,
+    runtimeIdentityExpectation: env.mcpTarget.runtimeIdentityExpectation,
   });
 
   const report = await runner.runSequentially(scenarios);
@@ -207,6 +209,14 @@ function findFirstFailedGate(
       scenarioId: firstFailedScenario.scenarioId,
       gate: "url_mismatch",
       details: firstFailedScenario.urlCheck.details,
+    };
+  }
+
+  if (firstFailedScenario.failureCategory === "runtime_identity_mismatch") {
+    return {
+      scenarioId: firstFailedScenario.scenarioId,
+      gate: "runtime_identity_mismatch",
+      details: firstFailedScenario.runtimeIdentityCheck.details,
     };
   }
 

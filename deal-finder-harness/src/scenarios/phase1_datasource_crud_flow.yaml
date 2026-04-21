@@ -35,6 +35,11 @@ assertions:
   expected_response_fields:
     - path: submitRequest.endpointTarget.submitEndpoint
       contains: "/mcp"
+    - path: submitRequest.endpointTarget.healthEndpoint
+      contains: "/healthz"
+    - path: submitRequest.endpointTarget.runtimeIdentity.status
+      equals: 200
+    - path: submitRequest.endpointTarget.runtimeIdentity.body.runtime_identity.app_scope
 ui_checks:
   - type: command_palette_command_present
     command_text: "Create data source"

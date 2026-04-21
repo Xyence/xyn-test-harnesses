@@ -403,6 +403,7 @@ async function submitDevelopmentRequestViaMcpProtocol(
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
       const init = await initializeMcpSession(config, token, mcpEndpointPath);
+      const runtimeIdentityProbe = await fetchMcpRuntimeIdentity(config, token, mcpEndpointPath);
       const listApplications = await callMcpTool(config, token, init.sessionId, "list_applications", {});
       const applicationId = extractFirstString(listApplications, [["response", "applications", "0", "id"]]);
       if (!applicationId) {
@@ -481,6 +482,10 @@ async function submitDevelopmentRequestViaMcpProtocol(
           endpointTarget: {
             baseUrl: config.baseUrl,
             submitEndpoint: mcpEndpointPath,
+            healthEndpoint: runtimeIdentityProbe.endpoint,
+            runtimeIdentity: runtimeIdentityProbe.payload,
+            metadataEndpoint: runtimeIdentityProbe.metadataEndpoint,
+            runtimeIdentityMetadata: runtimeIdentityProbe.metadataPayload,
           },
           mcpInitialize: init.responseBody,
           listApplications,
@@ -1318,6 +1323,98 @@ function isMcpProtocolEndpoint(path: string): boolean {
 function getMcpProtocolEndpointPath(config: McpDevelopmentConfig): string {
   const endpoints = resolveEndpoints(config.endpoints);
   return isMcpProtocolEndpoint(endpoints.submitRequest) ? endpoints.submitRequest : "/mcp";
+}
+
+function getMcpHealthEndpointPath(mcpEndpointPath: string): string {
+  const normalized = String(mcpEndpointPath || "").trim();
+  if (!normalized) {
+    return "/healthz";
+  }
+  if (normalized.toLowerCase().endsWith("/mcp")) {
+    return `${normalized.slice(0, -4)}/healthz`;
+  }
+  return "/healthz";
+}
+
+async function fetchMcpRuntimeIdentity(
+  config: McpDevelopmentConfig,
+  token: string,
+  endpointPath: string,
+): Promise<{ endpoint: string; payload: unknown; metadataEndpoint: string; metadataPayload: unknown }> {
+  const healthEndpoint = getMcpHealthEndpointPath(endpointPath);
+  const metadataEndpoint = getMcpProtectedResourcePath(endpointPath);
+  const url = new URL(healthEndpoint, config.baseUrl).toString();
+  const metadataUrl = new URL(metadataEndpoint, config.baseUrl).toString();
+  try {
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        authorization: `Bearer ${token}`,
+        accept: "application/json",
+      },
+    });
+    const text = await response.text().catch(() => "");
+    let payload: unknown = text;
+    try {
+      payload = text ? (JSON.parse(text) as unknown) : {};
+    } catch {
+      payload = text;
+    }
+    const metadataResponse = await fetch(metadataUrl, {
+      method: "GET",
+      headers: {
+        authorization: `Bearer ${token}`,
+        accept: "application/json",
+      },
+    });
+    const metadataText = await metadataResponse.text().catch(() => "");
+    let metadataPayload: unknown = metadataText;
+    try {
+      metadataPayload = metadataText ? (JSON.parse(metadataText) as unknown) : {};
+    } catch {
+      metadataPayload = metadataText;
+    }
+    return {
+      endpoint: healthEndpoint,
+      payload: {
+        status: response.status,
+        ok: response.ok,
+        body: payload,
+      },
+      metadataEndpoint,
+      metadataPayload: {
+        status: metadataResponse.status,
+        ok: metadataResponse.ok,
+        body: metadataPayload,
+      },
+    };
+  } catch (error: unknown) {
+    return {
+      endpoint: healthEndpoint,
+      payload: {
+        status: null,
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      },
+      metadataEndpoint,
+      metadataPayload: {
+        status: null,
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      },
+    };
+  }
+}
+
+function getMcpProtectedResourcePath(mcpEndpointPath: string): string {
+  const normalized = String(mcpEndpointPath || "").trim();
+  if (!normalized) {
+    return "/.well-known/oauth-protected-resource";
+  }
+  if (normalized.toLowerCase().endsWith("/mcp")) {
+    return `${normalized.slice(0, -4)}/.well-known/oauth-protected-resource`;
+  }
+  return "/.well-known/oauth-protected-resource";
 }
 
 async function initializeMcpSession(
