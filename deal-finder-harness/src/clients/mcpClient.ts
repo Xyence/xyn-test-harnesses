@@ -453,12 +453,32 @@ async function submitDevelopmentRequestViaMcpProtocol(
         };
       }
 
+      let dealFinderFlowActions: unknown = null;
+      if (scenario.suite === "deal-finder-mcp") {
+        const workspaceId =
+          extractFirstString(createSession, [["response", "raw", "session", "workspace_id"]]) ??
+          extractFirstString(sessionPlan, [["response", "raw", "session", "workspace_id"]]) ??
+          "";
+        dealFinderFlowActions = await runDealFinderFlowActions({
+          config,
+          token,
+          sessionId: init.sessionId,
+          scenario,
+          workspaceId,
+        });
+      }
+
       const rawResponses: MutableRawResponses = {
         submitRequest: {
+          endpointTarget: {
+            baseUrl: config.baseUrl,
+            submitEndpoint: "/mcp",
+          },
           mcpInitialize: init.responseBody,
           listApplications,
           createSession,
           previewPrep,
+          dealFinderFlowActions,
         },
         artifactSelection: createSession,
         plannerOutput: sessionPlan,
@@ -576,6 +596,120 @@ async function submitDevelopmentRequestViaMcpProtocol(
   throw new Error(
     `MCP protocol request failed after retries: ${lastError instanceof Error ? lastError.message : String(lastError)}`,
   );
+}
+
+async function runDealFinderFlowActions(args: {
+  config: McpDevelopmentConfig;
+  token: string;
+  sessionId: string;
+  scenario: ScenarioDefinition;
+  workspaceId: string;
+}): Promise<Record<string, unknown>> {
+  const workspaceId = String(args.workspaceId || "").trim();
+  if (!workspaceId) {
+    throw new Error(`Deal Finder MCP flow requires workspace_id; scenario=${args.scenario.id}`);
+  }
+
+  if (args.scenario.id === "mcp_create_campaign") {
+    const createCampaign = await callMcpTool(args.config, args.token, args.sessionId, "create_campaign", {
+      workspace_id: workspaceId,
+      name: "Q2 Retail Expansion Campaign",
+      campaign_type: "generic",
+      status: "draft",
+    });
+    const campaign =
+      (getByPath(createCampaign, ["response", "campaign"]) as Record<string, unknown> | undefined) ??
+      (getByPath(createCampaign, ["campaign"]) as Record<string, unknown> | undefined) ??
+      {};
+    return {
+      operation: "create_campaign",
+      entities: [{ type: "campaign", ...campaign }],
+      raw: { createCampaign },
+    };
+  }
+
+  if (args.scenario.id === "mcp_add_update_datasource") {
+    const createDataSource = await callMcpTool(args.config, args.token, args.sessionId, "create_data_source", {
+      key: "county-property-records",
+      name: "County Property Records",
+      source_type: "generic",
+      source_mode: "manual",
+      refresh_cadence_seconds: 3600,
+    });
+    const sourceId =
+      extractFirstString(createDataSource, [["response", "data_source", "id"]]) ??
+      extractFirstString(createDataSource, [["response", "source_connector", "id"]]) ??
+      extractFirstString(createDataSource, [["data_source", "id"]]);
+    if (!sourceId) {
+      throw new Error(`create_data_source returned no source id; raw=${safeStringify(createDataSource)}`);
+    }
+    const updateDataSource = await callMcpTool(args.config, args.token, args.sessionId, "update_data_source", {
+      source_id: sourceId,
+      payload: {
+        refresh_cadence_seconds: 86400,
+      },
+    });
+    const created =
+      (getByPath(createDataSource, ["response", "data_source"]) as Record<string, unknown> | undefined) ??
+      (getByPath(createDataSource, ["data_source"]) as Record<string, unknown> | undefined) ??
+      {};
+    const updated =
+      (getByPath(updateDataSource, ["response", "data_source"]) as Record<string, unknown> | undefined) ??
+      (getByPath(updateDataSource, ["data_source"]) as Record<string, unknown> | undefined) ??
+      {};
+    return {
+      operations: ["datasource_create", "datasource_update"],
+      entities: [
+        { type: "datasource", ...created },
+        { type: "datasource", ...updated },
+      ],
+      raw: { createDataSource, updateDataSource },
+    };
+  }
+
+  if (args.scenario.id === "mcp_create_update_notification_rule") {
+    const uniqueAddress = `alerts+deal-finder-${Date.now()}@xyence.io`;
+    const createNotificationRule = await callMcpTool(args.config, args.token, args.sessionId, "create_notification_rule", {
+      workspace_id: workspaceId,
+      address: uniqueAddress,
+      channel: "slack",
+      event: "campaign",
+      enabled: true,
+    });
+    const targetId =
+      extractFirstString(createNotificationRule, [["response", "notification_rule", "id"]]) ??
+      extractFirstString(createNotificationRule, [["notification_rule", "id"]]) ??
+      extractFirstString(createNotificationRule, [["response", "target", "id"]]);
+    if (!targetId) {
+      throw new Error(`create_notification_rule returned no target id; raw=${safeStringify(createNotificationRule)}`);
+    }
+    const updateNotificationRule = await callMcpTool(args.config, args.token, args.sessionId, "update_notification_rule", {
+      target_id: targetId,
+      workspace_id: workspaceId,
+      enabled: true,
+      payload: {
+        enabled: true,
+      },
+    });
+    const created =
+      (getByPath(createNotificationRule, ["response", "notification_rule"]) as Record<string, unknown> | undefined) ??
+      (getByPath(createNotificationRule, ["notification_rule"]) as Record<string, unknown> | undefined) ??
+      {};
+    const updated =
+      (getByPath(updateNotificationRule, ["response", "notification_rule"]) as Record<string, unknown> | undefined) ??
+      (getByPath(updateNotificationRule, ["notification_rule"]) as Record<string, unknown> | undefined) ??
+      {};
+    return {
+      operations: ["notification_rule_create", "notification_rule_update"],
+      entities: [
+        { type: "notification_rule", ...created },
+        { type: "notification_rule", ...updated },
+      ],
+      raw: { createNotificationRule, updateNotificationRule },
+    };
+  }
+
+  return { operation: "none", note: "No Deal Finder flow action defined for this scenario" };
 }
 
 function buildScenarioPlannerMetadata(scenario: ScenarioDefinition): Record<string, unknown> {

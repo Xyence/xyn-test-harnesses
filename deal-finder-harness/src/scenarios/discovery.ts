@@ -50,7 +50,6 @@ function inferScenarioSuite(scenarioId: string): ScenarioSuite {
     "mcp_create_campaign",
     "mcp_add_update_datasource",
     "mcp_create_update_notification_rule",
-    "phase1_datasource_crud_flow",
   ]);
   if (dealFinderMcpScenarioIds.has(id)) {
     return "deal-finder-mcp";

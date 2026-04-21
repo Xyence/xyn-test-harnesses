@@ -1,12 +1,13 @@
 id: mcp_add_update_datasource
+suite: deal-finder-mcp
 title: "MCP Native: Add And Update Data Source"
 request: >
   Add a new Deal Finder data source for county property records, then update its polling schedule to daily.
 expected_artifacts:
   - xyn-ui
-  - xyn-api
 expected_primary_artifact: xyn-ui
-optional_artifacts: []
+optional_artifacts:
+  - xyn-api
 forbidden_artifacts: []
 accepted_dependency_reasons:
   - ui_command_requires_api_route_registration
@@ -39,3 +40,5 @@ assertions:
       name_contains: county
   expected_response_fields:
     - path: plannerOutput.response.current_status
+    - path: submitRequest.endpointTarget.submitEndpoint
+      equals: "/mcp"

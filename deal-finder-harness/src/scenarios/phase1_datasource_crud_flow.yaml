@@ -1,4 +1,5 @@
 id: phase1_datasource_crud_flow
+suite: deal-finder-mcp
 title: "Phase1 DataSource CRUD Flow"
 request: >
   Implement Deal Finder data source CRUD commands in the command palette and verify create,
@@ -30,6 +31,10 @@ deployment:
   mode: preview
   requires_xyn_api: false
   require_branch_isolation: true
+assertions:
+  expected_response_fields:
+    - path: submitRequest.endpointTarget.submitEndpoint
+      equals: "/mcp"
 ui_checks:
   - type: command_palette_command_present
     command_text: "Create data source"

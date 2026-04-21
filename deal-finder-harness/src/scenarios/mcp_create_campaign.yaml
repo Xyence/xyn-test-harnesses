@@ -1,4 +1,5 @@
 id: mcp_create_campaign
+suite: deal-finder-mcp
 title: "MCP Native: Create Campaign"
 request: >
   Create a new Deal Finder campaign named "Q2 Retail Expansion Campaign" and return campaign metadata.
@@ -33,3 +34,5 @@ assertions:
       name_contains: retail
   expected_response_fields:
     - path: plannerOutput.response.current_status
+    - path: submitRequest.endpointTarget.submitEndpoint
+      equals: "/mcp"
