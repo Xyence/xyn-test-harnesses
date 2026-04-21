@@ -28,6 +28,7 @@ const RawEnvSchema = z
       .transform((value) => value.toLowerCase())
       .pipe(z.enum(["debug", "info", "warn", "error"])),
     DEAL_FINDER_MCP_BASE_URL: z.string().url().optional(),
+    DEAL_FINDER_MCP_ROUTING_MODE: z.enum(["path", "host"]).default("path"),
     MCP_BASE_URL: z.string().url().optional(),
     DEAL_FINDER_MCP_ENDPOINT_SUBMIT_REQUEST: z.string().min(1).optional(),
     MCP_ENDPOINT_SUBMIT_REQUEST: z.string().min(1).default("/mcp/development/requests"),
@@ -36,6 +37,8 @@ const RawEnvSchema = z
     DEAL_FINDER_MCP_AUDIENCE: z.string().min(1).optional(),
     DEAL_FINDER_MCP_EXPECTED_APP_SCOPE: z.string().min(1).optional(),
     DEAL_FINDER_MCP_EXPECTED_ENVIRONMENT: z.string().optional(),
+    DEAL_FINDER_MCP_EXPECTED_BINDING_NAMES: z.string().optional(),
+    DEAL_FINDER_MCP_HOST_HEADER: z.string().optional(),
     DEAL_FINDER_MCP_REQUIRE_DEPLOYMENT_ID: BooleanFromEnv.default(true),
     DEAL_FINDER_MCP_REQUIRE_BUILD_OR_IMAGE: BooleanFromEnv.default(true),
     MCP_ID_TOKEN_AUDIENCE: z.string().min(1).optional(),
@@ -76,9 +79,13 @@ export interface ResolvedMcpTargetConfig {
   readonly runtimeIdentityExpectation: {
     readonly expectedAppScope: string | null;
     readonly expectedEnvironment: string | null;
+    readonly expectedBindingNames: readonly string[];
+    readonly expectedRoutingMode: "path" | "host";
+    readonly requireHostContext: boolean;
     readonly requireDeploymentId: boolean;
     readonly requireBuildOrImage: boolean;
   };
+  readonly hostHeader: string | null;
 }
 
 export interface HarnessEnv extends RawEnv {
@@ -109,10 +116,21 @@ function resolveMcpTarget(env: RawEnv): ResolvedMcpTargetConfig {
     throw new Error("Invalid environment configuration: missing MCP target base URL");
   }
 
-  const submitRequestEndpoint =
-    env.DEAL_FINDER_MCP_ENDPOINT_SUBMIT_REQUEST ?? env.MCP_ENDPOINT_SUBMIT_REQUEST;
-  const healthEndpoint = env.DEAL_FINDER_MCP_ENDPOINT_HEALTH ?? env.MCP_ENDPOINT_HEALTH ?? "/mcp";
+  const defaultDealFinderSubmitEndpoint = env.DEAL_FINDER_MCP_ROUTING_MODE === "host" ? "/mcp" : "/deal-finder/mcp";
+  const submitRequestEndpoint = usingDealFinderTarget
+    ? env.DEAL_FINDER_MCP_ENDPOINT_SUBMIT_REQUEST ?? defaultDealFinderSubmitEndpoint
+    : env.MCP_ENDPOINT_SUBMIT_REQUEST;
+  const healthEndpoint = usingDealFinderTarget
+    ? env.DEAL_FINDER_MCP_ENDPOINT_HEALTH ?? submitRequestEndpoint
+    : env.MCP_ENDPOINT_HEALTH ?? "/mcp";
   const audience = env.DEAL_FINDER_MCP_AUDIENCE ?? env.MCP_ID_TOKEN_AUDIENCE ?? null;
+  const expectedBindingNames = parseCsvList(env.DEAL_FINDER_MCP_EXPECTED_BINDING_NAMES);
+  const derivedExpectedBindingNames =
+    expectedBindingNames.length > 0
+      ? expectedBindingNames
+      : env.DEAL_FINDER_MCP_ROUTING_MODE === "host"
+        ? (["deal-finder-prod", "deal-finder-test"] as const)
+        : (["deal-finder-path-compat"] as const);
 
   return {
     targetName: usingDealFinderTarget ? "deal_finder_mcp" : "generic_mcp",
@@ -128,8 +146,25 @@ function resolveMcpTarget(env: RawEnv): ResolvedMcpTargetConfig {
           : usingDealFinderTarget
             ? "local"
             : null,
+      expectedBindingNames: derivedExpectedBindingNames,
+      expectedRoutingMode: env.DEAL_FINDER_MCP_ROUTING_MODE,
+      requireHostContext: env.DEAL_FINDER_MCP_ROUTING_MODE === "host",
       requireDeploymentId: env.DEAL_FINDER_MCP_REQUIRE_DEPLOYMENT_ID,
       requireBuildOrImage: env.DEAL_FINDER_MCP_REQUIRE_BUILD_OR_IMAGE,
     },
+    hostHeader:
+      env.DEAL_FINDER_MCP_HOST_HEADER && env.DEAL_FINDER_MCP_HOST_HEADER.trim().length > 0
+        ? env.DEAL_FINDER_MCP_HOST_HEADER.trim()
+        : null,
   };
+}
+
+function parseCsvList(raw: string | undefined): string[] {
+  if (!raw) {
+    return [];
+  }
+  return raw
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
 }

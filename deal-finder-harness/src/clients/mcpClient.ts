@@ -65,6 +65,14 @@ export interface DevelopmentRequestResult {
   readonly siblingId: string;
   readonly siblingUrl: string;
   readonly branchName: string | null;
+  readonly toolSurface?: {
+    readonly listedTools: readonly string[];
+    readonly forbiddenToolProbe: {
+      readonly toolName: string;
+      readonly ok: boolean;
+      readonly error: unknown;
+    } | null;
+  };
   readonly rawResponses: {
     readonly submitRequest: unknown;
     readonly artifactSelection: unknown;
@@ -383,6 +391,10 @@ async function submitDevelopmentRequestViaRest(
     siblingId: requiredSiblingId,
     siblingUrl: requiredSiblingUrl,
     branchName: requiredBranchName,
+    toolSurface: {
+      listedTools: [],
+      forbiddenToolProbe: null,
+    },
     rawResponses,
   };
 }
@@ -404,6 +416,15 @@ async function submitDevelopmentRequestViaMcpProtocol(
     try {
       const init = await initializeMcpSession(config, token, mcpEndpointPath);
       const runtimeIdentityProbe = await fetchMcpRuntimeIdentity(config, token, mcpEndpointPath);
+      const toolsList = await listMcpTools(config, token, init.sessionId, mcpEndpointPath);
+      const listedTools = extractToolNamesFromToolsList(toolsList);
+      const forbiddenToolProbe = await callMcpToolAllowFailure(
+        config,
+        token,
+        init.sessionId,
+        "list_applications",
+        {},
+      );
       const listApplications = await callMcpTool(config, token, init.sessionId, "list_applications", {});
       const applicationId = extractFirstString(listApplications, [["response", "applications", "0", "id"]]);
       if (!applicationId) {
@@ -486,6 +507,9 @@ async function submitDevelopmentRequestViaMcpProtocol(
             runtimeIdentity: runtimeIdentityProbe.payload,
             metadataEndpoint: runtimeIdentityProbe.metadataEndpoint,
             runtimeIdentityMetadata: runtimeIdentityProbe.metadataPayload,
+            toolsList,
+            listedTools,
+            forbiddenToolProbe,
           },
           mcpInitialize: init.responseBody,
           listApplications,
@@ -596,6 +620,14 @@ async function submitDevelopmentRequestViaMcpProtocol(
         siblingUrl: requiredSiblingUrl,
         branchName,
         rawResponses,
+        toolSurface: {
+          listedTools,
+          forbiddenToolProbe: {
+            toolName: "list_applications",
+            ok: forbiddenToolProbe.ok,
+            error: forbiddenToolProbe.ok ? null : forbiddenToolProbe.error,
+          },
+        },
       };
     } catch (error: unknown) {
       lastError = error;
@@ -1348,10 +1380,9 @@ async function fetchMcpRuntimeIdentity(
   try {
     const response = await fetch(url, {
       method: "GET",
-      headers: {
-        authorization: `Bearer ${token}`,
+      headers: buildMcpHeaders(config, token, {
         accept: "application/json",
-      },
+      }),
     });
     const text = await response.text().catch(() => "");
     let payload: unknown = text;
@@ -1362,10 +1393,9 @@ async function fetchMcpRuntimeIdentity(
     }
     const metadataResponse = await fetch(metadataUrl, {
       method: "GET",
-      headers: {
-        authorization: `Bearer ${token}`,
+      headers: buildMcpHeaders(config, token, {
         accept: "application/json",
-      },
+      }),
     });
     const metadataText = await metadataResponse.text().catch(() => "");
     let metadataPayload: unknown = metadataText;
@@ -1426,11 +1456,10 @@ async function initializeMcpSession(
   const url = new URL(endpoint, config.baseUrl).toString();
   const response = await fetch(url, {
     method: "POST",
-    headers: {
-      authorization: `Bearer ${token}`,
+    headers: buildMcpHeaders(config, token, {
       "content-type": "application/json",
       accept: "application/json, text/event-stream",
-    },
+    }),
     body: JSON.stringify({
       jsonrpc: "2.0",
       id: "harness-init",
@@ -1467,6 +1496,40 @@ async function initializeMcpSession(
   };
 }
 
+async function listMcpTools(
+  config: McpDevelopmentConfig,
+  token: string,
+  sessionId: string,
+  endpointPath?: string,
+): Promise<Record<string, unknown>> {
+  const endpoint = endpointPath ?? getMcpProtocolEndpointPath(config);
+  const url = new URL(endpoint, config.baseUrl).toString();
+  const response = await fetch(url, {
+    method: "POST",
+    headers: buildMcpHeaders(config, token, {
+      "mcp-session-id": sessionId,
+      "content-type": "application/json",
+      accept: "application/json, text/event-stream",
+    }),
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: `tools-list-${Date.now()}`,
+      method: "tools/list",
+      params: {},
+    }),
+  });
+  const responseBody = await response.text().catch(() => "");
+  if (!response.ok) {
+    throw new McpHttpError({
+      endpoint,
+      status: response.status,
+      errorBody: responseBody,
+      message: `MCP tools/list failed with status ${response.status}; raw=${responseBody.slice(0, 800)}`,
+    });
+  }
+  return parseMcpStreamResponse(responseBody);
+}
+
 async function callMcpTool(
   config: McpDevelopmentConfig,
   token: string,
@@ -1481,12 +1544,11 @@ async function callMcpTool(
 
   const response = await fetch(url, {
     method: "POST",
-    headers: {
-      authorization: `Bearer ${token}`,
+    headers: buildMcpHeaders(config, token, {
       "mcp-session-id": sessionId,
       "content-type": "application/json",
       accept: "application/json, text/event-stream",
-    },
+    }),
     body: JSON.stringify({
       jsonrpc: "2.0",
       id: requestId,
@@ -1545,6 +1607,33 @@ function parseMcpStreamResponse(body: string): Record<string, unknown> {
       `Failed to parse MCP SSE data payload: ${error instanceof Error ? error.message : String(error)}; raw=${dataLine.slice(0, 800)}`,
     );
   }
+}
+
+function extractToolNamesFromToolsList(payload: Record<string, unknown>): string[] {
+  const result = getByPath(payload, ["result"]);
+  if (typeof result !== "object" || result === null) {
+    return [];
+  }
+  const tools = (result as Record<string, unknown>).tools;
+  if (!Array.isArray(tools)) {
+    return [];
+  }
+  return tools
+    .map((item) => (item && typeof item === "object" ? String((item as Record<string, unknown>).name ?? "") : ""))
+    .map((name) => name.trim())
+    .filter((name) => name.length > 0);
+}
+
+function buildMcpHeaders(
+  config: McpDevelopmentConfig,
+  token: string,
+  extra: Record<string, string>,
+): Record<string, string> {
+  return {
+    authorization: `Bearer ${token}`,
+    ...(config.extraHeaders ?? {}),
+    ...extra,
+  };
 }
 
 function extractArtifactTitles(value: unknown): string[] | undefined {

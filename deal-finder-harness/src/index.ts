@@ -25,6 +25,7 @@ async function main(): Promise<void> {
     targetConfigSource: env.mcpTarget.targetName,
     targetSubmitEndpoint: env.mcpTarget.submitRequestEndpoint,
     targetHealthEndpoint: env.mcpTarget.healthEndpoint,
+    targetHostHeader: env.mcpTarget.hostHeader,
     configuredAudience: env.mcpTarget.audience,
     runtimeIdentityExpectation: env.mcpTarget.runtimeIdentityExpectation,
   });
@@ -34,6 +35,7 @@ async function main(): Promise<void> {
     healthEndpoint: env.mcpTarget.healthEndpoint,
     submitEndpoint: env.mcpTarget.submitRequestEndpoint,
     bearerToken: session.accessToken,
+    extraHeaders: env.mcpTarget.hostHeader ? { Host: env.mcpTarget.hostHeader } : undefined,
     tokenMode: env.MCP_AUTH_TOKEN_MODE,
     tokenType: session.tokenType,
     audience: session.audience,
@@ -53,6 +55,7 @@ async function main(): Promise<void> {
       siblingUrl: env.MCP_ENDPOINT_SIBLING_URL,
       branchInfo: env.MCP_ENDPOINT_BRANCH_INFO,
     },
+    extraHeaders: env.mcpTarget.hostHeader ? { Host: env.mcpTarget.hostHeader } : undefined,
   });
 
   const discovered = await discoverScenarios();
@@ -118,6 +121,7 @@ async function probeMcpConnectivity(args: {
   healthEndpoint: string;
   submitEndpoint: string;
   bearerToken: string;
+  extraHeaders?: Record<string, string>;
   tokenMode: "access_token" | "id_token";
   tokenType: "access_token" | "id_token";
   audience: string | string[] | null;
@@ -129,6 +133,7 @@ async function probeMcpConnectivity(args: {
     headers: {
       authorization: `Bearer ${args.bearerToken}`,
       accept: "text/event-stream",
+      ...(args.extraHeaders ?? {}),
     },
   });
 

@@ -21,6 +21,7 @@ import {
   type RuntimeIdentityCheckResult,
   type RuntimeIdentityExpectation,
 } from "../checks/runtimeIdentityCheck";
+import { runToolSurfaceCheck, type ToolSurfaceCheckResult } from "../checks/toolSurfaceCheck";
 import type { ScenarioDefinition } from "../scenarios/types";
 
 export interface ScenarioRunResult {
@@ -44,6 +45,7 @@ export interface ScenarioRunResult {
     | "source_state_transition_failure"
     | "endpoint_targeting_failure"
     | "runtime_identity_mismatch"
+    | "tool_surface_mismatch"
     | "sibling_mismatch"
     | "url_mismatch"
     | null;
@@ -58,6 +60,7 @@ export interface ScenarioRunResult {
     readonly responseField: McpAssertionCheckResult;
   };
   readonly runtimeIdentityCheck: RuntimeIdentityCheckResult;
+  readonly toolSurfaceCheck: ToolSurfaceCheckResult;
 }
 
 export interface ArtifactSelectionDifferenceViolation {
@@ -190,6 +193,9 @@ const SKIPPED_RUNTIME_IDENTITY_CHECK: RuntimeIdentityCheckResult = {
   observed: {
     expectedAppScope: null,
     expectedEnvironment: null,
+    expectedBindingNames: [],
+    expectedRoutingMode: "path",
+    requireHostContext: false,
     appScope: null,
     environment: null,
     deploymentId: null,
@@ -197,6 +203,20 @@ const SKIPPED_RUNTIME_IDENTITY_CHECK: RuntimeIdentityCheckResult = {
     imageTag: null,
     healthBindingName: null,
     metadataBindingName: null,
+    bindingHost: null,
+    metadataBindingHost: null,
+  },
+};
+
+const SKIPPED_TOOL_SURFACE_CHECK: ToolSurfaceCheckResult = {
+  passed: true,
+  details: ["Tool surface check not required for this scenario"],
+  observed: {
+    listedTools: [],
+    requiredMissing: [],
+    forbiddenPresent: [],
+    forbiddenExecutionProbeTool: null,
+    forbiddenExecutionRejected: null,
   },
 };
 
@@ -243,6 +263,7 @@ export class ScenarioRunner {
             responseField: EMPTY_ASSERTION_CHECK,
           },
           runtimeIdentityCheck: SKIPPED_RUNTIME_IDENTITY_CHECK,
+          toolSurfaceCheck: SKIPPED_TOOL_SURFACE_CHECK,
         });
         continue;
       }
@@ -274,6 +295,7 @@ export class ScenarioRunner {
             responseField: EMPTY_ASSERTION_CHECK,
           },
           runtimeIdentityCheck: SKIPPED_RUNTIME_IDENTITY_CHECK,
+          toolSurfaceCheck: SKIPPED_TOOL_SURFACE_CHECK,
         });
         continue;
       }
@@ -310,13 +332,15 @@ export class ScenarioRunner {
         mcpResult.developmentResult,
         this.deps.runtimeIdentityExpectation,
       );
+      const toolSurfaceCheck = runToolSurfaceCheck(scenario, mcpResult.developmentResult);
 
       const assertionPassed =
         campaignCheck.passed &&
         dataSourceCheck.passed &&
         notificationCheck.passed &&
         responseFieldCheck.passed &&
-        runtimeIdentityCheck.passed;
+        runtimeIdentityCheck.passed &&
+        toolSurfaceCheck.passed;
 
       const scenarioPassed =
         artifactSelectionCheck.passed &&
@@ -336,6 +360,7 @@ export class ScenarioRunner {
             assertionPassed,
             responseFieldCheck,
             runtimeIdentityPassed: runtimeIdentityCheck.passed,
+            toolSurfacePassed: toolSurfaceCheck.passed,
           });
 
       scenarioResults.push({
@@ -359,6 +384,7 @@ export class ScenarioRunner {
           responseField: responseFieldCheck,
         },
         runtimeIdentityCheck,
+        toolSurfaceCheck,
       });
     }
 
@@ -574,6 +600,7 @@ function classifyFailureCategory(args: {
   assertionPassed: boolean;
   responseFieldCheck: McpAssertionCheckResult;
   runtimeIdentityPassed: boolean;
+  toolSurfacePassed: boolean;
 }):
   | "planner_mismatch"
   | "artifact_mismatch"
@@ -584,6 +611,7 @@ function classifyFailureCategory(args: {
   | "source_state_transition_failure"
   | "endpoint_targeting_failure"
   | "runtime_identity_mismatch"
+  | "tool_surface_mismatch"
   | "sibling_mismatch"
   | "url_mismatch" {
   if (!args.artifactSelectionPassed) {
@@ -611,6 +639,10 @@ function classifyFailureCategory(args: {
 
   if (!args.runtimeIdentityPassed) {
     return "runtime_identity_mismatch";
+  }
+
+  if (!args.toolSurfacePassed) {
+    return "tool_surface_mismatch";
   }
 
   return "entity_assertion_failure";

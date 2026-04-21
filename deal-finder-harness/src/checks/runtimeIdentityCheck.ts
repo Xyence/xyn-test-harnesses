@@ -4,6 +4,9 @@ import type { ScenarioDefinition } from "../scenarios/types";
 export interface RuntimeIdentityExpectation {
   readonly expectedAppScope: string | null;
   readonly expectedEnvironment: string | null;
+  readonly expectedBindingNames: readonly string[];
+  readonly expectedRoutingMode: "path" | "host";
+  readonly requireHostContext: boolean;
   readonly requireDeploymentId: boolean;
   readonly requireBuildOrImage: boolean;
 }
@@ -14,6 +17,9 @@ export interface RuntimeIdentityCheckResult {
   readonly observed: {
     readonly expectedAppScope: string | null;
     readonly expectedEnvironment: string | null;
+    readonly expectedBindingNames: readonly string[];
+    readonly expectedRoutingMode: "path" | "host";
+    readonly requireHostContext: boolean;
     readonly appScope: string | null;
     readonly environment: string | null;
     readonly deploymentId: string | null;
@@ -21,6 +27,8 @@ export interface RuntimeIdentityCheckResult {
     readonly imageTag: string | null;
     readonly healthBindingName: string | null;
     readonly metadataBindingName: string | null;
+    readonly bindingHost: string | null;
+    readonly metadataBindingHost: string | null;
   };
 }
 
@@ -36,6 +44,9 @@ export function runRuntimeIdentityCheck(
       observed: {
         expectedAppScope: expectation.expectedAppScope,
         expectedEnvironment: expectation.expectedEnvironment,
+        expectedBindingNames: expectation.expectedBindingNames,
+        expectedRoutingMode: expectation.expectedRoutingMode,
+        requireHostContext: expectation.requireHostContext,
         appScope: null,
         environment: null,
         deploymentId: null,
@@ -43,6 +54,8 @@ export function runRuntimeIdentityCheck(
         imageTag: null,
         healthBindingName: null,
         metadataBindingName: null,
+        bindingHost: null,
+        metadataBindingHost: null,
       },
     };
   }
@@ -64,6 +77,8 @@ export function runRuntimeIdentityCheck(
   const imageTag = asString(runtimeIdentity.image_tag);
   const healthBindingName = asString(runtimeIdentity.binding_name);
   const metadataBindingName = asString(metadataIdentity.binding_name);
+  const bindingHost = asString(runtimeIdentity.binding_host);
+  const metadataBindingHost = asString(metadataIdentity.binding_host);
 
   const details: string[] = [];
   let passed = true;
@@ -85,6 +100,28 @@ export function runRuntimeIdentityCheck(
       );
     } else {
       details.push("environment matches expected value");
+    }
+  }
+
+  if (expectation.expectedBindingNames.length > 0) {
+    if (!healthBindingName || !expectation.expectedBindingNames.includes(healthBindingName)) {
+      passed = false;
+      details.push(
+        `binding_name mismatch: expected one of [${expectation.expectedBindingNames.join(", ")}], got '${
+          healthBindingName ?? "null"
+        }'`,
+      );
+    } else {
+      details.push("binding_name matches approved binding set");
+    }
+  }
+
+  if (expectation.requireHostContext) {
+    if (!bindingHost) {
+      passed = false;
+      details.push("host routing expected but binding_host is missing");
+    } else {
+      details.push("host routing context is present (binding_host)");
     }
   }
 
@@ -133,6 +170,9 @@ export function runRuntimeIdentityCheck(
     observed: {
       expectedAppScope: expectation.expectedAppScope,
       expectedEnvironment: expectation.expectedEnvironment,
+      expectedBindingNames: expectation.expectedBindingNames,
+      expectedRoutingMode: expectation.expectedRoutingMode,
+      requireHostContext: expectation.requireHostContext,
       appScope,
       environment,
       deploymentId,
@@ -140,6 +180,8 @@ export function runRuntimeIdentityCheck(
       imageTag,
       healthBindingName,
       metadataBindingName,
+      bindingHost,
+      metadataBindingHost,
     },
   };
 }
